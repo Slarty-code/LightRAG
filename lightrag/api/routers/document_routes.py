@@ -951,6 +951,10 @@ class PipelineStatusResponse(BaseModel):
         latest_message: Latest message from pipeline processing
         history_messages: List of history messages
         update_status: Status of update flags for all namespaces
+        chunks_total: Aggregated chunk count target for active document(s)
+        chunks_done: Chunks finished entity extraction so far (aggregated)
+        current_doc_id: Document id for the most recently updated chunk progress
+        chunk_progress: Per-document_id map of {total, done} for parallel inserts
     """
 
     autoscanned: bool = False
@@ -964,6 +968,10 @@ class PipelineStatusResponse(BaseModel):
     latest_message: str = ""
     history_messages: Optional[List[str]] = None
     update_status: Optional[dict] = None
+    chunks_total: int = 0
+    chunks_done: int = 0
+    current_doc_id: Optional[str] = None
+    chunk_progress: Optional[Dict[str, Dict[str, int]]] = None
 
     @field_validator("job_start", mode="before")
     @classmethod
@@ -3351,6 +3359,22 @@ def create_document_routes(
             if "job_start" in status_dict and status_dict["job_start"]:
                 # Use format_datetime to ensure consistent formatting
                 status_dict["job_start"] = format_datetime(status_dict["job_start"])
+
+            status_dict.setdefault("chunks_total", 0)
+            status_dict.setdefault("chunks_done", 0)
+            status_dict.setdefault("current_doc_id", None)
+            cp_raw = status_dict.get("chunk_progress")
+            if cp_raw:
+                status_dict["chunk_progress"] = {
+                    str(k): {
+                        "total": int(v.get("total", 0)),
+                        "done": int(v.get("done", 0)),
+                    }
+                    for k, v in dict(cp_raw).items()
+                    if isinstance(v, dict)
+                }
+            else:
+                status_dict["chunk_progress"] = None
 
             return PipelineStatusResponse(**status_dict)
         except Exception as e:

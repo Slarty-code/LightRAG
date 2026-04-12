@@ -39,7 +39,13 @@ from lightrag.exceptions import (
     PipelineCancelledException,
     IndexFlushError,
 )
-from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
+from lightrag.kg.shared_storage import (
+    clear_pipeline_chunk_progress,
+    get_namespace_data,
+    get_namespace_lock,
+    register_pipeline_chunk_progress,
+    unregister_pipeline_chunk_progress,
+)
 from lightrag.operate import merge_nodes_and_edges
 from lightrag.parser.base import ParseContext
 from lightrag.parser.registry import (
@@ -1128,6 +1134,7 @@ class _PipelineMixin:
                 )
                 pipeline_status["cancellation_reason"] = None
                 pipeline_status["cancellation_detail"] = None
+                clear_pipeline_chunk_progress(pipeline_status)
                 pipeline_status["history_messages"].append(stopped_message)
                 if internal_halt is not None:
                     pipeline_status["history_messages"].append(internal_halt)
@@ -2055,6 +2062,7 @@ class _PipelineMixin:
         process_start_time = int(time.time())
         first_stage_tasks: list[asyncio.Task] = []
         entity_relation_task: asyncio.Task | None = None
+        registered_chunk_progress = False
         chunks: dict[str, Any] = {}
         content_data: dict[str, Any] | None = None
         extraction_meta: dict[str, Any] = {}
@@ -2481,6 +2489,13 @@ class _PipelineMixin:
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 )
 
+                if chunks:
+                    async with ctx.pipeline_status_lock:
+                        register_pipeline_chunk_progress(
+                            ctx.pipeline_status, doc_id, len(chunks)
+                        )
+                    registered_chunk_progress = True
+
                 # Stage 1: persist doc_status PROCESSING + chunks in parallel.
                 doc_status_task = asyncio.create_task(
                     self._upsert_doc_status_transition(
@@ -2552,6 +2567,12 @@ class _PipelineMixin:
                     pipeline_status=ctx.pipeline_status,
                     pipeline_status_lock=ctx.pipeline_status_lock,
                 )
+                if registered_chunk_progress:
+                    async with ctx.pipeline_status_lock:
+                        unregister_pipeline_chunk_progress(
+                            ctx.pipeline_status, doc_id
+                        )
+                    registered_chunk_progress = False
 
             # Concurrency is controlled by keyed lock for individual
             # entities and relationships.
@@ -2624,6 +2645,12 @@ class _PipelineMixin:
                         logger.info(log_message)
                         ctx.pipeline_status["latest_message"] = log_message
                         ctx.pipeline_status["history_messages"].append(log_message)
+                    if registered_chunk_progress:
+                        async with ctx.pipeline_status_lock:
+                            unregister_pipeline_chunk_progress(
+                                ctx.pipeline_status, doc_id
+                            )
+                        registered_chunk_progress = False
 
                 except Exception as e:
                     # A storage flush failure (raised by _insert_done) is not
@@ -2664,6 +2691,12 @@ class _PipelineMixin:
                         pipeline_status=ctx.pipeline_status,
                         pipeline_status_lock=ctx.pipeline_status_lock,
                     )
+                    if registered_chunk_progress:
+                        async with ctx.pipeline_status_lock:
+                            unregister_pipeline_chunk_progress(
+                                ctx.pipeline_status, doc_id
+                            )
+                        registered_chunk_progress = False
 
     async def _purge_stale_extraction_if_resuming(
         self,

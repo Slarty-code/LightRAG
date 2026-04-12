@@ -343,6 +343,10 @@ export type PipelineStatusResponse = {
   latest_message: string
   history_messages?: string[]
   update_status?: Record<string, any>
+  chunks_total?: number
+  chunks_done?: number
+  current_doc_id?: string | null
+  chunk_progress?: Record<string, { total: number; done: number }> | null
 }
 
 export type LoginResponse = {
