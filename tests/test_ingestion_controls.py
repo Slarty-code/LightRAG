@@ -1,4 +1,8 @@
+# ruff: noqa: E402
 from datetime import datetime, timezone
+import sys
+
+sys.argv = sys.argv[:1]
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -166,8 +170,8 @@ async def test_pause_active_job_sets_pipeline_pause_flag():
         doc_status = MemoryDocStatus({"doc-1": make_doc(DocStatus.PROCESSING)})
         rag = ControlRAG(workspace, doc_status)
 
-        pipeline_status = await get_namespace_data("pipeline_status", workspace)
-        pipeline_status_lock = get_namespace_lock("pipeline_status", workspace)
+        pipeline_status = await get_namespace_data("pipeline_status", workspace=workspace)
+        pipeline_status_lock = get_namespace_lock("pipeline_status", workspace=workspace)
         async with pipeline_status_lock:
             pipeline_status["busy"] = True
             pipeline_status["active_track_ids"] = ["job-1"]
