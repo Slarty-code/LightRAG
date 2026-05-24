@@ -3,6 +3,7 @@ This module contains all document-related routes for the LightRAG API.
 """
 
 import asyncio
+import math
 import re
 import shutil
 import time
@@ -23,6 +24,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     UploadFile,
 )
@@ -55,6 +57,7 @@ from lightrag.utils import (
     move_file_to_parsed_dir,
 )
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.api.routers.ingestion_routes import register_ingestion_job
 from ..config import global_args
 
 
@@ -113,6 +116,111 @@ def is_valid_file_source(file_source: str | None) -> bool:
     if file_source is None:
         return False
     return normalize_file_path(file_source) != UNKNOWN_FILE_SOURCE
+
+
+def resolve_max_ingestion_chunks(max_chunks_override: int | None = None) -> int | None:
+    """Resolve the active API chunk guard threshold for ingestion requests."""
+    max_chunks = (
+        max_chunks_override
+        if max_chunks_override is not None
+        else getattr(global_args, "max_ingestion_chunks", 1000)
+    )
+    if max_chunks is None or max_chunks <= 0:
+        return None
+    return max_chunks
+
+
+def estimate_chunk_count_from_tokens(token_count: int, *, step: int) -> int:
+    """Estimate chunk count from token count for the default token splitter."""
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / step)
+
+
+def estimate_chunk_count_for_texts(
+    rag: LightRAG, texts: list[str], *, chunk_token_size: int | None = None
+) -> int:
+    """Estimate chunks using the same tokenizer and chunk window as ingestion."""
+    chunk_size = chunk_token_size or int(rag.chunk_token_size)
+    overlap = int(rag.chunk_overlap_token_size)
+    step = max(chunk_size - overlap, 1)
+
+    total_chunks = 0
+    for text in texts:
+        token_count = len(rag.tokenizer.encode(text or ""))
+        total_chunks += estimate_chunk_count_from_tokens(token_count, step=step)
+    return total_chunks
+
+
+async def estimate_chunk_count_for_file(rag: LightRAG, file_path: Path) -> int:
+    """Estimate chunks for an uploaded file before scheduling background ingestion."""
+    async with aiofiles.open(file_path, "rb") as file:
+        file_bytes = await file.read()
+
+    try:
+        text = file_bytes.decode("utf-8")
+        return estimate_chunk_count_for_texts(rag, [text])
+    except UnicodeDecodeError:
+        # Binary formats are parsed in the background. Use a conservative byte-based
+        # estimate so obviously large uploads still require explicit confirmation.
+        estimated_tokens = max(1, math.ceil(len(file_bytes) / 4))
+        chunk_size = int(rag.chunk_token_size)
+        step = max(chunk_size - int(rag.chunk_overlap_token_size), 1)
+        return estimate_chunk_count_from_tokens(estimated_tokens, step=step)
+
+
+def _raise_large_ingestion_error(estimated_chunks: int, max_chunks: int) -> None:
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "large_ingestion_requires_confirmation",
+            "message": (
+                "Estimated chunks exceed the configured ingestion guard. "
+                "Retry with confirm_large_ingestion=true to proceed."
+            ),
+            "estimated_chunks": estimated_chunks,
+            "max_chunks": max_chunks,
+            "confirm_large_ingestion_required": True,
+        },
+    )
+
+
+def enforce_max_ingestion_chunks(
+    rag: LightRAG,
+    texts: list[str],
+    *,
+    confirm_large_ingestion: bool = False,
+    max_chunks_override: int | None = None,
+) -> int:
+    """Reject oversized API text ingestion unless explicitly confirmed."""
+    max_chunks = resolve_max_ingestion_chunks(max_chunks_override)
+    estimated_chunks = estimate_chunk_count_for_texts(rag, texts)
+    if (
+        max_chunks is not None
+        and estimated_chunks > max_chunks
+        and not confirm_large_ingestion
+    ):
+        _raise_large_ingestion_error(estimated_chunks, max_chunks)
+    return estimated_chunks
+
+
+async def enforce_max_ingestion_chunks_for_file(
+    rag: LightRAG,
+    file_path: Path,
+    *,
+    confirm_large_ingestion: bool = False,
+    max_chunks_override: int | None = None,
+) -> int:
+    """Reject oversized file uploads before scheduling ingestion."""
+    max_chunks = resolve_max_ingestion_chunks(max_chunks_override)
+    estimated_chunks = await estimate_chunk_count_for_file(rag, file_path)
+    if (
+        max_chunks is not None
+        and estimated_chunks > max_chunks
+        and not confirm_large_ingestion
+    ):
+        _raise_large_ingestion_error(estimated_chunks, max_chunks)
+    return estimated_chunks
 
 
 def sanitize_filename(filename: str, input_dir: Path) -> str:
@@ -416,6 +524,15 @@ class InsertTextRequest(BaseModel):
         default=None,
         description="Chunking strategy and params; omit for default fixed-token chunking",
     )
+    confirm_large_ingestion: bool = Field(
+        default=False,
+        description="Set true to allow ingestion when estimated chunks exceed the configured guard.",
+    )
+    max_chunks_override: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional per-request maximum chunk threshold for this ingestion.",
+    )
 
     @field_validator("text", mode="after")
     @classmethod
@@ -441,6 +558,7 @@ class InsertTextRequest(BaseModel):
                         "split_by_character_only": True,
                     },
                 },
+                "confirm_large_ingestion": False,
             }
         }
     )
@@ -464,6 +582,15 @@ class InsertTextsRequest(BaseModel):
     chunking: Optional[TextChunkingConfig] = Field(
         default=None,
         description="Shared chunking strategy and params for all texts; omit for default fixed-token chunking",
+    )
+    confirm_large_ingestion: bool = Field(
+        default=False,
+        description="Set true to allow ingestion when estimated chunks exceed the configured guard.",
+    )
+    max_chunks_override: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional per-request maximum chunk threshold for this ingestion.",
     )
 
     @field_validator("texts", mode="after")
@@ -495,6 +622,7 @@ class InsertTextsRequest(BaseModel):
                     "strategy": "recursive_character",
                     "params": {"chunk_token_size": 1000},
                 },
+                "confirm_large_ingestion": False,
             }
         }
     )
@@ -965,6 +1093,10 @@ class PipelineStatusResponse(BaseModel):
     batchs: int = 0
     cur_batch: int = 0
     request_pending: bool = False
+    pause_requested: bool = False
+    paused: bool = False
+    paused_job_id: Optional[str] = None
+    active_track_ids: Optional[List[str]] = None
     latest_message: str = ""
     history_messages: Optional[List[str]] = None
     update_status: Optional[dict] = None
@@ -2480,6 +2612,7 @@ def create_document_routes(
 
         # Generate track_id with "scan" prefix for scanning operation
         track_id = generate_track_id("scan")
+        register_ingestion_job(track_id)
 
         try:
             pipeline_status = await get_namespace_data(
@@ -2572,7 +2705,10 @@ def create_document_routes(
         "/upload", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
     )
     async def upload_to_input_dir(
-        background_tasks: BackgroundTasks, file: UploadFile = File(...)
+        background_tasks: BackgroundTasks,
+        file: UploadFile = File(...),
+        confirm_large_ingestion: bool = Form(False),
+        max_chunks_override: Optional[int] = Form(None, ge=1),
     ):
         """
         Upload a file to the input directory and index it.
@@ -2775,7 +2911,24 @@ def create_document_routes(
                     detail=f"File too large. Maximum size: {global_args.max_upload_size / 1024 / 1024:.1f}MB, uploaded: {bytes_written / 1024 / 1024:.1f}MB",
                 )
 
+            try:
+                await enforce_max_ingestion_chunks_for_file(
+                    rag,
+                    file_path,
+                    confirm_large_ingestion=confirm_large_ingestion,
+                    max_chunks_override=max_chunks_override,
+                )
+            except HTTPException:
+                try:
+                    file_path.unlink()
+                except Exception as cleanup_error:
+                    logger.error(
+                        f"Error cleaning up rejected large file {safe_filename}: {cleanup_error}"
+                    )
+                raise
+
             track_id = generate_track_id("upload")
+            register_ingestion_job(track_id)
 
             # Bg task: enqueue + trigger processing, then release the slot.
             # ``pipeline_index_file`` does both: it calls
@@ -2886,8 +3039,16 @@ def create_document_routes(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
 
+            enforce_max_ingestion_chunks(
+                rag,
+                [request.text],
+                confirm_large_ingestion=request.confirm_large_ingestion,
+                max_chunks_override=request.max_chunks_override,
+            )
+
             # Generate track_id for text insertion
             track_id = generate_track_id("insert")
+            register_ingestion_job(track_id)
 
             async def _indexing_task():
                 try:
@@ -3363,6 +3524,10 @@ def create_document_routes(
             status_dict.setdefault("chunks_total", 0)
             status_dict.setdefault("chunks_done", 0)
             status_dict.setdefault("current_doc_id", None)
+            status_dict.setdefault("pause_requested", False)
+            status_dict.setdefault("paused", False)
+            status_dict.setdefault("paused_job_id", None)
+            status_dict.setdefault("active_track_ids", None)
             cp_raw = status_dict.get("chunk_progress")
             if cp_raw:
                 status_dict["chunk_progress"] = {
@@ -3412,6 +3577,7 @@ def create_document_routes(
                 DocStatus.PROCESSING,
                 DocStatus.PREPROCESSED,
                 DocStatus.PROCESSED,
+                DocStatus.PAUSED,
                 DocStatus.FAILED,
             )
 

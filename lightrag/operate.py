@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 
 from lightrag.exceptions import (
     PipelineCancelledException,
+    PipelinePausedException,
 )
 from lightrag.utils import (
     logger,
@@ -3335,6 +3336,8 @@ async def extract_entities(
                 raise PipelineCancelledException(
                     "User cancelled during entity extraction"
                 )
+            if pipeline_status.get("pause_requested", False):
+                raise PipelinePausedException("User paused during entity extraction")
 
     use_llm_func: callable = global_config["role_llm_funcs"]["extract"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
@@ -3729,6 +3732,10 @@ async def extract_entities(
                     if pipeline_status.get("cancellation_requested", False):
                         raise PipelineCancelledException(
                             "User cancelled during chunk processing"
+                        )
+                    if pipeline_status.get("pause_requested", False):
+                        raise PipelinePausedException(
+                            "User paused during chunk processing"
                         )
 
             try:
