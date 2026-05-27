@@ -14,6 +14,7 @@ from collections import Counter, defaultdict
 from lightrag.exceptions import (
     IndexFlushError,
     PipelineCancelledException,
+    PipelinePausedException,
 )
 from lightrag.utils import (
     logger,
@@ -3659,6 +3660,8 @@ async def extract_entities(
                 raise PipelineCancelledException(
                     "User cancelled during entity extraction"
                 )
+            if pipeline_status.get("pause_requested", False):
+                raise PipelinePausedException("User paused during entity extraction")
 
     # Operation-scoped status logger shared by all chunk tasks: the first
     # history write fetches the shared list once; every per-chunk log is then
@@ -4052,6 +4055,10 @@ async def extract_entities(
                     if pipeline_status.get("cancellation_requested", False):
                         raise PipelineCancelledException(
                             "User cancelled during chunk processing"
+                        )
+                    if pipeline_status.get("pause_requested", False):
+                        raise PipelinePausedException(
+                            "User paused during chunk processing"
                         )
 
             try:

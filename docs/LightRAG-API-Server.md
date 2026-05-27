@@ -1254,3 +1254,21 @@ This endpoint provides comprehensive status information including:
 * Content summary and metadata
 * Error messages if processing failed
 * Timestamps for creation and updates
+
+### Ingestion pause, resume, and large-ingestion guard
+
+**Pause / resume** (non-destructive alternative to `POST /documents/cancel_pipeline`):
+
+* `POST /api/ingestion/pause/{track_id}` — cooperative pause at the next safe checkpoint; in-flight documents may be marked `paused`
+* `POST /api/ingestion/resume/{track_id}` — re-queues `paused` documents as `pending` and nudges the pipeline
+
+`track_id` is the value returned from upload or text insert endpoints. Use `GET /documents/pipeline_status` to read `pause_requested`, `paused`, `paused_job_id`, and `active_track_ids`.
+
+**Large-ingestion chunk guard** (complements byte limit `MAX_UPLOAD_SIZE`):
+
+* `MAX_INGESTION_CHUNKS` in `.env` (default `1000`; set `0` or unset to disable)
+* Upload: form field `confirm_large_ingestion=true`
+* Text insert: JSON field `confirm_large_ingestion: true` on `/documents/text` and `/documents/texts`
+* When estimated chunks exceed the limit without confirmation, the API returns HTTP `400` with `detail.code` = `large_ingestion_requires_confirmation`, plus `estimated_chunks` and `max_chunks`
+
+Binary uploads use a conservative chunk estimate before parsing; confirmation is still required when the estimate exceeds the threshold.

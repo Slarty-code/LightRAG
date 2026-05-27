@@ -110,7 +110,8 @@
         "dragAndDrop": "Drag and drop files here, or click to select files",
         "removeFile": "Remove file",
         "uploadDescription": "You can upload {{isMultiple ? 'multiple' : count}} files (up to {{maxSize}} each)",
-        "duplicateFile": "File name already exists in server cache"
+        "duplicateFile": "File name already exists in server cache",
+        "largeIngestionConfirm": "This file may produce about {{estimated}} chunks (limit {{max}}). Proceed with ingestion?"
       }
     },
     "documentManager": {
@@ -193,6 +194,22 @@
       "cancelSuccess": "Pipeline cancellation requested",
       "cancelFailed": "Failed to cancel pipeline\n{{error}}",
       "cancelNotBusy": "Pipeline is not running, no need to cancel",
+      "pauseButton": "Pause",
+      "pauseTooltip": "Pause ingestion at the next safe checkpoint",
+      "pauseRequested": "Pause Requested",
+      "paused": "Paused",
+      "pauseConfirmTitle": "Confirm Pipeline Pause",
+      "pauseConfirmDescription": "Processing will stop cooperatively. You can resume later without re-uploading.",
+      "pauseConfirmButton": "Confirm Pause",
+      "pauseSuccess": "Pause requested",
+      "pauseAlready": "Pipeline is already paused",
+      "pauseFailed": "Failed to pause pipeline\n{{error}}",
+      "pauseNoJob": "No active track ID is available to pause",
+      "resumeButton": "Resume",
+      "resumeTooltip": "Resume paused documents for this job",
+      "resumeSuccess": "Resume started",
+      "resumeQueued": "Resume queued while pipeline is busy",
+      "resumeFailed": "Failed to resume pipeline\n{{error}}",
       "errors": {
         "fetchFailed": "Failed to fetch pipeline status\n{{error}}"
       }

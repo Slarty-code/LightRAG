@@ -847,6 +847,7 @@ class DocStatus(str, Enum):
     PROCESSING = "processing"  # Phase 3: entity/relation extraction
     PREPROCESSED = "preprocessed"  # Deprecated: use ANALYZING in new pipeline
     PROCESSED = "processed"
+    PAUSED = "paused"
     FAILED = "failed"
 
 

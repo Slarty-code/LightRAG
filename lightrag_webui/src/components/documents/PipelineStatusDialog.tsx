@@ -11,7 +11,13 @@ import {
   DialogDescription
 } from '@/components/ui/Dialog'
 import Button from '@/components/ui/Button'
-import { getPipelineStatus, cancelPipeline, PipelineStatusResponse } from '@/api/lightrag'
+import {
+  getPipelineStatus,
+  cancelPipeline,
+  pauseIngestion,
+  resumeIngestion,
+  PipelineStatusResponse
+} from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -31,7 +37,11 @@ export default function PipelineStatusDialog({
   const [position, setPosition] = useState<DialogPosition>('center')
   const [isUserScrolled, setIsUserScrolled] = useState(false)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showPauseConfirm, setShowPauseConfirm] = useState(false)
   const historyRef = useRef<HTMLDivElement>(null)
+
+  const activeJobId =
+    status?.paused_job_id ?? status?.active_track_ids?.[0] ?? null
 
   // Reset UI state whenever the controlling open prop changes.
   useEffect(() => {
@@ -44,6 +54,7 @@ export default function PipelineStatusDialog({
     }
 
     setShowCancelConfirm(false)
+    setShowPauseConfirm(false)
   }, [open])
 
   // Handle scroll position
@@ -102,8 +113,53 @@ export default function PipelineStatusDialog({
     }
   }
 
-  // Determine if cancel button should be enabled
+  const handleConfirmPause = async () => {
+    setShowPauseConfirm(false)
+    if (!activeJobId) {
+      toast.error(t('documentPanel.pipelineStatus.pauseNoJob'))
+      return
+    }
+    try {
+      const result = await pauseIngestion(activeJobId)
+      if (result.status === 'pause_requested' || result.status === 'paused') {
+        toast.success(t('documentPanel.pipelineStatus.pauseSuccess'))
+      } else if (result.status === 'already_paused') {
+        toast.info(t('documentPanel.pipelineStatus.pauseAlready'))
+      } else {
+        toast.info(result.message)
+      }
+    } catch (err) {
+      toast.error(t('documentPanel.pipelineStatus.pauseFailed', { error: errorMessage(err) }))
+    }
+  }
+
+  const handleResume = async () => {
+    if (!activeJobId) {
+      toast.error(t('documentPanel.pipelineStatus.pauseNoJob'))
+      return
+    }
+    try {
+      const result = await resumeIngestion(activeJobId)
+      if (result.status === 'resume_started') {
+        toast.success(t('documentPanel.pipelineStatus.resumeSuccess'))
+      } else if (result.status === 'already_running') {
+        toast.info(t('documentPanel.pipelineStatus.resumeQueued'))
+      } else {
+        toast.info(result.message)
+      }
+    } catch (err) {
+      toast.error(t('documentPanel.pipelineStatus.resumeFailed', { error: errorMessage(err) }))
+    }
+  }
+
   const canCancel = status?.busy === true && !status?.cancellation_requested
+  const canPause =
+    Boolean(activeJobId) &&
+    status?.busy === true &&
+    !status?.cancellation_requested &&
+    !status?.pause_requested &&
+    !status?.paused
+  const canResume = Boolean(activeJobId) && (status?.paused === true || status?.pause_requested === true)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -181,24 +237,59 @@ export default function PipelineStatusDialog({
                   <div className="h-2 w-2 rounded-full bg-red-500" />
                 </div>
               )}
+              {status?.pause_requested && (
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.pauseRequested')}:</div>
+                  <div className="h-2 w-2 rounded-full bg-amber-500" />
+                </div>
+              )}
+              {status?.paused && (
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.paused')}:</div>
+                  <div className="h-2 w-2 rounded-full bg-amber-500" />
+                </div>
+              )}
             </div>
 
-            {/* Right side: Cancel button - only show when pipeline is busy */}
-            {status?.busy && (
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={!canCancel}
-                onClick={() => setShowCancelConfirm(true)}
-                title={
-                  status?.cancellation_requested
-                    ? t('documentPanel.pipelineStatus.cancelInProgress')
-                    : t('documentPanel.pipelineStatus.cancelTooltip')
-                }
-              >
-                {t('documentPanel.pipelineStatus.cancelButton')}
-              </Button>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {status?.busy && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canPause}
+                  onClick={() => setShowPauseConfirm(true)}
+                  title={t('documentPanel.pipelineStatus.pauseTooltip')}
+                >
+                  {t('documentPanel.pipelineStatus.pauseButton')}
+                </Button>
+              )}
+              {(status?.busy || status?.paused) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canResume}
+                  onClick={handleResume}
+                  title={t('documentPanel.pipelineStatus.resumeTooltip')}
+                >
+                  {t('documentPanel.pipelineStatus.resumeButton')}
+                </Button>
+              )}
+              {status?.busy && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={!canCancel}
+                  onClick={() => setShowCancelConfirm(true)}
+                  title={
+                    status?.cancellation_requested
+                      ? t('documentPanel.pipelineStatus.cancelInProgress')
+                      : t('documentPanel.pipelineStatus.cancelTooltip')
+                  }
+                >
+                  {t('documentPanel.pipelineStatus.cancelButton')}
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Job Information */}
@@ -236,6 +327,25 @@ export default function PipelineStatusDialog({
           </div>
         </div>
       </DialogContent>
+
+      <Dialog open={showPauseConfirm} onOpenChange={setShowPauseConfirm}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{t('documentPanel.pipelineStatus.pauseConfirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('documentPanel.pipelineStatus.pauseConfirmDescription')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setShowPauseConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={handleConfirmPause}>
+              {t('documentPanel.pipelineStatus.pauseConfirmButton')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Cancel Confirmation Dialog */}
       <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>

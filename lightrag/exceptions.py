@@ -404,6 +404,14 @@ class IndexFlushError(Exception):
         super().__init__(f"{storage_name}[{namespace}] index flush failed: {cause}")
 
 
+class PipelinePausedException(Exception):
+    """Raised when pipeline processing is paused by user request."""
+
+    def __init__(self, message: str = "User paused"):
+        super().__init__(message)
+        self.message = message
+
+
 class ChunkTokenLimitExceededError(ValueError):
     """Raised when a chunk exceeds the configured token limit."""
 

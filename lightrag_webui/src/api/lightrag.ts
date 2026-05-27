@@ -336,9 +336,26 @@ export type PipelineStatusResponse = {
   batchs: number
   cur_batch: number
   cancellation_requested?: boolean
+  pause_requested?: boolean
+  paused?: boolean
+  paused_job_id?: string | null
+  active_track_ids?: string[] | null
   latest_message: string
   history_messages?: string[]
   update_status?: Record<string, any>
+}
+
+export type IngestionControlResponse = {
+  status:
+    | 'pause_requested'
+    | 'paused'
+    | 'already_paused'
+    | 'resume_started'
+    | 'already_running'
+    | 'not_busy'
+    | 'not_paused'
+  message: string
+  job_id: string
 }
 
 export type LoginResponse = {
@@ -892,10 +909,14 @@ export const insertTexts = async (texts: string[]): Promise<DocActionResponse> =
 
 export const uploadDocument = async (
   file: File,
-  onUploadProgress?: (percentCompleted: number) => void
+  onUploadProgress?: (percentCompleted: number) => void,
+  options?: { confirmLargeIngestion?: boolean }
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
+  if (options?.confirmLargeIngestion) {
+    formData.append('confirm_large_ingestion', 'true')
+  }
 
   const response = await axiosInstance.post('/documents/upload', formData, {
     headers: {
@@ -1018,6 +1039,20 @@ export const cancelPipeline = async (): Promise<{
   message: string
 }> => {
   const response = await axiosInstance.post('/documents/cancel_pipeline')
+  return response.data
+}
+
+export const pauseIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
+  const response = await axiosInstance.post(
+    `/api/ingestion/pause/${encodeURIComponent(jobId)}`
+  )
+  return response.data
+}
+
+export const resumeIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
+  const response = await axiosInstance.post(
+    `/api/ingestion/resume/${encodeURIComponent(jobId)}`
+  )
   return response.data
 }
 

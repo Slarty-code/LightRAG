@@ -25,6 +25,24 @@ import { getSupportedFileTypes, uploadDocument } from '@/api/lightrag'
 import { UploadIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+type LargeIngestionGuardDetail = {
+  estimated_chunks?: number
+  max_chunks?: number
+  confirm_large_ingestion_required?: boolean
+}
+
+function parseLargeIngestionGuard(err: unknown): LargeIngestionGuardDetail | null {
+  if (!err || typeof err !== 'object' || !('response' in err)) {
+    return null
+  }
+  const response = (err as { response?: { status?: number; data?: { detail?: unknown } } }).response
+  if (response?.status !== 400 || !response.data?.detail || typeof response.data.detail !== 'object') {
+    return null
+  }
+  const detail = response.data.detail as LargeIngestionGuardDetail
+  return detail.confirm_large_ingestion_required ? detail : null
+}
+
 interface UploadDocumentsDialogProps {
   onDocumentsUploaded?: () => Promise<void>
   /**
@@ -136,13 +154,43 @@ export default function UploadDocumentsDialog({
               [file.name]: 0
             }))
 
-            const result = await uploadDocument(file, (percentCompleted: number) => {
-              console.debug(t('documentPanel.uploadDocuments.single.uploading', { name: file.name, percent: percentCompleted }))
-              setProgresses((pre) => ({
-                ...pre,
-                [file.name]: percentCompleted
-              }))
-            })
+            const uploadWithProgress = (confirmLargeIngestion: boolean) =>
+              uploadDocument(
+                file,
+                (percentCompleted: number) => {
+                  console.debug(
+                    t('documentPanel.uploadDocuments.single.uploading', {
+                      name: file.name,
+                      percent: percentCompleted
+                    })
+                  )
+                  setProgresses((pre) => ({
+                    ...pre,
+                    [file.name]: percentCompleted
+                  }))
+                },
+                { confirmLargeIngestion }
+              )
+
+            let result
+            try {
+              result = await uploadWithProgress(false)
+            } catch (firstErr) {
+              const guard = parseLargeIngestionGuard(firstErr)
+              if (
+                guard &&
+                window.confirm(
+                  t('documentPanel.uploadDocuments.fileUploader.largeIngestionConfirm', {
+                    estimated: guard.estimated_chunks ?? '?',
+                    max: guard.max_chunks ?? '?'
+                  })
+                )
+              ) {
+                result = await uploadWithProgress(true)
+              } else {
+                throw firstErr
+              }
+            }
 
             if (result.status !== 'success') {
               uploadErrors[file.name] = result.message
@@ -185,9 +233,27 @@ export default function UploadDocumentsDialog({
                 } else {
                   errorMsg = detail || errorMsg
                 }
-              } else if (status === 400 || status === 413 || status === 429 || status === 503) {
-                // 400 invalid request, 413 body/file too large, 429 pipeline at
-                // capacity (MAX_PENDING_DOCUMENTS — the detail carries how many
+              } else if (status === 400) {
+                if (typeof detail === 'object' && detail !== null) {
+                  const guard = detail as LargeIngestionGuardDetail
+                  if (guard.confirm_large_ingestion_required) {
+                    errorMsg = t(
+                      'documentPanel.uploadDocuments.fileUploader.largeIngestionConfirm',
+                      {
+                        estimated: guard.estimated_chunks ?? '?',
+                        max: guard.max_chunks ?? '?'
+                      }
+                    )
+                  } else {
+                    errorMsg =
+                      (detail as { message?: string }).message || errorMsg
+                  }
+                } else {
+                  errorMsg = (detail as string) || errorMsg
+                }
+              } else if (status === 413 || status === 429 || status === 503) {
+                // 413 body/file too large, 429 pipeline at capacity
+                // (MAX_PENDING_DOCUMENTS — the detail carries how many
                 // documents are active, how many were requested, the capacity and
                 // a retry hint), 503 document storage unavailable. Each detail is
                 // written to be shown to a user verbatim.
