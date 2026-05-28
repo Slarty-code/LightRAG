@@ -4036,7 +4036,12 @@ async def extract_entities(
         processed_chunks += 1
         entities_count = len(maybe_nodes)
         relations_count = len(maybe_edges)
-        log_message = f"Chunk {processed_chunks} of {total_chunks} extracted {entities_count} Ent + {relations_count} Rel {chunk_key}"
+        # NOTE: processed_chunks tracks completion order under concurrency,
+        # while chunk_key suffix reflects source chunk index. They can differ.
+        log_message = (
+            f"Chunk completion {processed_chunks}/{total_chunks}: "
+            f"{entities_count} Ent + {relations_count} Rel {chunk_key}"
+        )
         logger.info(log_message)
         status_logger.log(log_message)
 

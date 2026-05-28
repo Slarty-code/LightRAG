@@ -3,9 +3,9 @@ import type { DocStatus, DocumentsRequest } from '@/api/lightrag'
 export type StatusBucket = 'completed' | 'parse' | 'analyze' | 'process' | 'failed'
 export type StatusFilter = StatusBucket | 'all'
 
-// Each filter bucket maps to exactly one DocStatus. `pending` and the deprecated
-// `preprocessed` intentionally have no dedicated bucket — they only surface under
-// the "all" tab.
+// Each filter bucket maps to exactly one DocStatus. `pending`, `paused`, and
+// the deprecated `preprocessed` intentionally have no dedicated bucket — they
+// only surface under the "all" tab.
 const BUCKET_TO_STATUS: Record<StatusBucket, DocStatus> = {
   completed: 'processed',
   parse: 'parsing',

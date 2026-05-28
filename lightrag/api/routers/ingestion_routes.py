@@ -116,6 +116,13 @@ async def restore_paused_job_docs(rag: LightRAG, job_id: str) -> int:
     return len(resume_updates)
 
 
+async def count_paused_job_docs(rag: LightRAG, job_id: str) -> int:
+    docs = await rag.doc_status.get_docs_by_track_id(job_id)
+    return sum(
+        1 for doc in docs.values() if _doc_status_value(doc) == DocStatus.PAUSED.value
+    )
+
+
 async def request_ingestion_pause(
     rag: LightRAG, job_id: str
 ) -> IngestionControlResponse:
@@ -183,28 +190,47 @@ async def request_ingestion_pause(
 async def resume_ingestion_job(
     rag: LightRAG, job_id: str, background_tasks: BackgroundTasks
 ) -> IngestionControlResponse:
-    docs = await rag.doc_status.get_docs_by_track_id(job_id)
-    if not docs:
-        raise HTTPException(
-            status_code=404, detail=f"Ingestion job '{job_id}' not found"
-        )
-
-    resumed_count = await restore_paused_job_docs(rag, job_id)
-    if resumed_count == 0 and not any(
-        _doc_status_value(doc) == DocStatus.PAUSED.value for doc in docs.values()
-    ):
-        return IngestionControlResponse(
-            status="not_paused",
-            message="Ingestion job has no paused documents to resume.",
-            job_id=job_id,
-        )
-
     pipeline_status = await get_namespace_data(
         "pipeline_status", workspace=rag.workspace
     )
     pipeline_status_lock = get_namespace_lock(
         "pipeline_status", workspace=rag.workspace
     )
+
+    requested_docs = await rag.doc_status.get_docs_by_track_id(job_id)
+    if not requested_docs:
+        raise HTTPException(
+            status_code=404, detail=f"Ingestion job '{job_id}' not found"
+        )
+
+    # Resolve the best resume target. When multiple tracks are active, the UI may
+    # send a valid-but-not-current track id; fall back to the currently paused id
+    # and active track ids to find where PAUSED docs actually live.
+    candidates: list[str] = []
+    for candidate in [
+        job_id,
+        pipeline_status.get("paused_job_id"),
+        *(pipeline_status.get("active_track_ids") or []),
+    ]:
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    target_job_id = job_id
+    resumed_count = 0
+    for candidate in candidates:
+        paused_count = await count_paused_job_docs(rag, candidate)
+        if paused_count > 0:
+            target_job_id = candidate
+            resumed_count = await restore_paused_job_docs(rag, candidate)
+            break
+
+    if resumed_count == 0:
+        return IngestionControlResponse(
+            status="not_paused",
+            message="Ingestion job has no paused documents to resume.",
+            job_id=job_id,
+        )
+
     async with pipeline_status_lock:
         pipeline_status["pause_requested"] = False
         pipeline_status["paused"] = False
@@ -214,14 +240,14 @@ async def resume_ingestion_job(
             return IngestionControlResponse(
                 status="already_running",
                 message="Pipeline is already running; resume request has been queued.",
-                job_id=job_id,
+                job_id=target_job_id,
             )
 
     background_tasks.add_task(rag.apipeline_process_enqueue_documents)
     return IngestionControlResponse(
         status="resume_started",
         message=f"Resume started for {resumed_count} paused document(s).",
-        job_id=job_id,
+        job_id=target_job_id,
     )
 
 

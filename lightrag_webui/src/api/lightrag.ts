@@ -256,6 +256,7 @@ export type DeleteDocResponse = {
 
 export type DocStatus =
   | 'pending'
+  | 'paused'
   | 'parsing'
   | 'analyzing'
   | 'processing'
@@ -533,11 +534,9 @@ axiosInstance.interceptors.response.use(
         navigationService.navigateToLogin();
         return Promise.reject(new Error('Authentication required'));
       }
-      throw new Error(
-        `${error.response.status} ${error.response.statusText}\n${JSON.stringify(
-          error.response.data
-        )}\n${error.config?.url}`
-      )
+      // Preserve structured Axios errors (status/data/headers) so callers can
+      // branch on response details, e.g. large-ingestion confirmation handling.
+      return Promise.reject(error)
     }
     throw error
   }

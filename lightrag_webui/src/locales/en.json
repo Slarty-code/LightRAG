@@ -35,6 +35,7 @@
   },
   "common": {
     "cancel": "Cancel",
+    "confirm": "Confirm",
     "save": "Save",
     "saving": "Saving...",
     "saveFailed": "Save failed"
@@ -86,6 +87,7 @@
       "button": "Upload",
       "tooltip": "Upload documents",
       "title": "Upload Documents",
+      "largeIngestionTitle": "Large ingestion confirmation",
       "description": "Drag and drop your documents here or click to browse.",
       "single": {
         "uploading": "Uploading {{name}}: {{percent}}%",

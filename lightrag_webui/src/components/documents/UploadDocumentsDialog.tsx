@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { FileRejection } from 'react-dropzone'
 import Button from '@/components/ui/Button'
 import {
@@ -7,7 +7,8 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger
+  DialogTrigger,
+  DialogFooter
 } from '@/components/ui/Dialog'
 import FileUploader from '@/components/ui/FileUploader'
 import { toast } from 'sonner'
@@ -63,6 +64,12 @@ export default function UploadDocumentsDialog({
   const [progresses, setProgresses] = useState<Record<string, number>>({})
   const [fileErrors, setFileErrors] = useState<Record<string, string>>({})
   const [fileTypes, setFileTypes] = useState<FileTypesState>({ status: 'idle' })
+  const [showLargeIngestionConfirm, setShowLargeIngestionConfirm] = useState(false)
+  const [largeIngestionPrompt, setLargeIngestionPrompt] = useState({
+    estimated: '?',
+    max: '?'
+  })
+  const largeIngestionResolverRef = useRef<((proceed: boolean) => void) | null>(null)
 
   // Fetch the live allowlist + engine capability matrix while the dialog is
   // open. `loading` is entered synchronously in onOpenChange (not here) so
@@ -85,6 +92,21 @@ export default function UploadDocumentsDialog({
       })
     return () => controller.abort()
   }, [open])
+
+  const requestLargeIngestionConfirm = useCallback((estimated: string, max: string): Promise<boolean> => {
+    setLargeIngestionPrompt({ estimated, max })
+    setShowLargeIngestionConfirm(true)
+    return new Promise((resolve) => {
+      largeIngestionResolverRef.current = resolve
+    })
+  }, [])
+
+  const resolveLargeIngestionConfirm = useCallback((proceed: boolean) => {
+    setShowLargeIngestionConfirm(false)
+    const resolver = largeIngestionResolverRef.current
+    largeIngestionResolverRef.current = null
+    resolver?.(proceed)
+  }, [])
 
   const handleRejectedFiles = useCallback(
     (rejectedFiles: FileRejection[]) => {
@@ -177,15 +199,14 @@ export default function UploadDocumentsDialog({
               result = await uploadWithProgress(false)
             } catch (firstErr) {
               const guard = parseLargeIngestionGuard(firstErr)
-              if (
-                guard &&
-                window.confirm(
-                  t('documentPanel.uploadDocuments.fileUploader.largeIngestionConfirm', {
-                    estimated: guard.estimated_chunks ?? '?',
-                    max: guard.max_chunks ?? '?'
-                  })
+              const shouldProceed = guard
+                ? await requestLargeIngestionConfirm(
+                  String(guard.estimated_chunks ?? '?'),
+                  String(guard.max_chunks ?? '?')
                 )
-              ) {
+                : false
+
+              if (shouldProceed) {
                 result = await uploadWithProgress(true)
               } else {
                 throw firstErr
@@ -302,7 +323,7 @@ export default function UploadDocumentsDialog({
         setIsUploading(false)
       }
     },
-    [setIsUploading, setProgresses, setFileErrors, t, onDocumentsUploaded, onUploadBatchAccepted]
+    [setIsUploading, setProgresses, setFileErrors, t, onDocumentsUploaded, onUploadBatchAccepted, requestLargeIngestionConfirm]
   )
 
   const uploaderInputs = deriveUploaderInputs(fileTypes)
@@ -356,6 +377,32 @@ export default function UploadDocumentsDialog({
           engineCapabilities={uploaderInputs.engineCapabilities}
         />
       </DialogContent>
+
+      <Dialog open={showLargeIngestionConfirm} onOpenChange={(open) => {
+        if (!open) {
+          resolveLargeIngestionConfirm(false)
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('documentPanel.uploadDocuments.largeIngestionTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('documentPanel.uploadDocuments.fileUploader.largeIngestionConfirm', {
+                estimated: largeIngestionPrompt.estimated,
+                max: largeIngestionPrompt.max
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => resolveLargeIngestionConfirm(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={() => resolveLargeIngestionConfirm(true)}>
+              {t('common.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

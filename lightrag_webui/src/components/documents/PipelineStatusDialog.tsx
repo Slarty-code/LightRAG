@@ -41,7 +41,10 @@ export default function PipelineStatusDialog({
   const historyRef = useRef<HTMLDivElement>(null)
 
   const activeJobId =
-    status?.paused_job_id ?? status?.active_track_ids?.[0] ?? null
+    status?.paused_job_id ??
+    (status?.active_track_ids?.length
+      ? status.active_track_ids[status.active_track_ids.length - 1]
+      : null)
 
   // Reset UI state whenever the controlling open prop changes.
   useEffect(() => {
