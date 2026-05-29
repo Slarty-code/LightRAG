@@ -1255,20 +1255,24 @@ This endpoint provides comprehensive status information including:
 * Error messages if processing failed
 * Timestamps for creation and updates
 
-### Ingestion pause, resume, and large-ingestion guard
+### Ingestion stop/start-over controls and large-ingestion guard
 
-**Pause / resume** (non-destructive alternative to `POST /documents/cancel_pipeline`):
+**Stop Safely / Start Over semantics** (non-destructive alternative to `POST /documents/cancel_pipeline`):
 
-* `POST /api/ingestion/pause/{track_id}` — cooperative pause at the next safe checkpoint; in-flight documents may be marked `paused`
-* `POST /api/ingestion/resume/{track_id}` — re-queues `paused` documents as `pending` and nudges the pipeline
+* `POST /api/ingestion/pause/{track_id}` — cooperative safe-stop at the next checkpoint; in-flight documents may be marked `paused`
+* `POST /api/ingestion/resume/{track_id}` — Start Over behavior: re-queues `paused` documents as `pending` and reprocesses them from the beginning
 
 `track_id` is the value returned from upload or text insert endpoints. Use `GET /documents/pipeline_status` to read `pause_requested`, `paused`, `paused_job_id`, and `active_track_ids`.
 
 **Large-ingestion chunk guard** (complements byte limit `MAX_UPLOAD_SIZE`):
 
 * `MAX_INGESTION_CHUNKS` in `.env` (default `1000`; set `0` or unset to disable)
-* Upload: form field `confirm_large_ingestion=true`
+* Upload preflight: `POST /documents/upload/preflight` with multipart `file`
+  * returns `preflight_id`, `estimated_chunks`, `max_chunks`, `confirm_required`, `expires_at`
+* Upload confirmation: `POST /documents/upload` supports form fields:
+  * `confirm_large_ingestion=true`
+  * `preflight_id=<token from preflight>`
 * Text insert: JSON field `confirm_large_ingestion: true` on `/documents/text` and `/documents/texts`
-* When estimated chunks exceed the limit without confirmation, the API returns HTTP `400` with `detail.code` = `large_ingestion_requires_confirmation`, plus `estimated_chunks` and `max_chunks`
+* When estimated chunks exceed the limit without confirmation, the API returns HTTP `400` with `detail.code` = `large_ingestion_requires_confirmation`, plus `estimated_chunks`, `max_chunks`, and (when available) `preflight_id`
 
-Binary uploads use a conservative chunk estimate before parsing; confirmation is still required when the estimate exceeds the threshold.
+Preflight estimation parses reusable text using existing extractor code paths, so binary-file estimates are much closer to final chunk counts. A confirmed upload can reuse preflight parser output to avoid parsing the same file twice.

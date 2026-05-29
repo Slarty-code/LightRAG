@@ -21,7 +21,7 @@ import {
   type FileTypesState
 } from '@/lib/fileTypes'
 import { errorMessage } from '@/lib/utils'
-import { getSupportedFileTypes, uploadDocument } from '@/api/lightrag'
+import { getSupportedFileTypes, uploadDocument, uploadPreflight } from '@/api/lightrag'
 
 import { UploadIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -30,6 +30,7 @@ type LargeIngestionGuardDetail = {
   estimated_chunks?: number
   max_chunks?: number
   confirm_large_ingestion_required?: boolean
+  preflight_id?: string
 }
 
 function parseLargeIngestionGuard(err: unknown): LargeIngestionGuardDetail | null {
@@ -176,7 +177,10 @@ export default function UploadDocumentsDialog({
               [file.name]: 0
             }))
 
-            const uploadWithProgress = (confirmLargeIngestion: boolean) =>
+            const uploadWithProgress = (
+              confirmLargeIngestion: boolean,
+              preflightId?: string
+            ) =>
               uploadDocument(
                 file,
                 (percentCompleted: number) => {
@@ -191,12 +195,22 @@ export default function UploadDocumentsDialog({
                     [file.name]: percentCompleted
                   }))
                 },
-                { confirmLargeIngestion }
+                { confirmLargeIngestion, preflightId }
               )
 
             let result
             try {
-              result = await uploadWithProgress(false)
+              const preflight = await uploadPreflight(file)
+              const shouldProceed = preflight.confirm_required
+                ? await requestLargeIngestionConfirm(
+                  String(preflight.estimated_chunks ?? '?'),
+                  String(preflight.max_chunks ?? '?')
+                )
+                : true
+              if (!shouldProceed) {
+                throw new Error(t('documentPanel.uploadDocuments.fileUploader.uploadCancelled'))
+              }
+              result = await uploadWithProgress(shouldProceed, preflight.preflight_id)
             } catch (firstErr) {
               const guard = parseLargeIngestionGuard(firstErr)
               const shouldProceed = guard
@@ -207,7 +221,7 @@ export default function UploadDocumentsDialog({
                 : false
 
               if (shouldProceed) {
-                result = await uploadWithProgress(true)
+                result = await uploadWithProgress(true, guard?.preflight_id)
               } else {
                 throw firstErr
               }

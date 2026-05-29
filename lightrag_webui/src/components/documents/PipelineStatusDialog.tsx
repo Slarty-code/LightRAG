@@ -294,6 +294,11 @@ export default function PipelineStatusDialog({
               )}
             </div>
           </div>
+          {(status?.paused || status?.pause_requested) && (
+            <div className="text-xs text-muted-foreground">
+              {t('documentPanel.pipelineStatus.resumeHint')}
+            </div>
+          )}
 
           {/* Job Information */}
           <div className="rounded-md border p-3 space-y-2">

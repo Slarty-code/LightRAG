@@ -5,6 +5,7 @@ This module contains all document-related routes for the LightRAG API.
 import asyncio
 import base64
 import binascii
+import hashlib
 import math
 import os
 
@@ -90,6 +91,7 @@ from lightrag.constants import (
     PROCESS_OPTION_CHUNK_PARAGRAH,
     PROCESS_OPTION_CHUNK_RECURSIVE,
     PROCESS_OPTION_CHUNK_VECTOR,
+    PARSER_ENGINE_LEGACY,
 )
 from lightrag.tools.source_conflict_repair import (
     refuse_an_unusable_primary,
@@ -109,9 +111,12 @@ from lightrag.parser.routing import (
     canonicalize_parser_hinted_basename,
     chunk_strategy_key,
     encode_parse_engine,
+    filename_parser_hint,
     parse_process_options,
     resolve_chunk_options,
+    resolve_file_parser_directives,
     resolve_parser_directives,
+    sanitize_process_options,
 )
 from lightrag.utils import (
     generate_track_id,
@@ -161,6 +166,9 @@ temp_prefix = "__tmp__"
 UNKNOWN_FILE_SOURCE = "unknown_source"
 LEGACY_EMPTY_FILE_PATH_SENTINELS = {"", "no-file-path"}
 ARCHIVED_FILE_SUFFIX_RE = re.compile(r"_(?:\d{3}|\d{10,})$")
+INGESTION_PREFLIGHT_NAMESPACE = "ingestion_preflight"
+INGESTION_PREFLIGHT_TTL_SECONDS = 15 * 60
+INGESTION_PREFLIGHT_MAX_ENTRIES = 256
 
 # ``Retry-After`` hint on an admission 429. Capacity frees up when a document
 # finishes processing, which is a document-scale wait, not a request-scale one —
@@ -233,19 +241,176 @@ async def estimate_chunk_count_for_file(rag: LightRAG, file_path: Path) -> int:
 
 
 def _raise_large_ingestion_error(estimated_chunks: int, max_chunks: int) -> None:
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "code": "large_ingestion_requires_confirmation",
-            "message": (
-                "Estimated chunks exceed the configured ingestion guard. "
-                "Retry with confirm_large_ingestion=true to proceed."
-            ),
-            "estimated_chunks": estimated_chunks,
-            "max_chunks": max_chunks,
-            "confirm_large_ingestion_required": True,
-        },
+    _raise_large_ingestion_error_with_preflight(
+        estimated_chunks=estimated_chunks, max_chunks=max_chunks, preflight_id=None
     )
+
+
+def _raise_large_ingestion_error_with_preflight(
+    *,
+    estimated_chunks: int,
+    max_chunks: int,
+    preflight_id: str | None,
+) -> None:
+    detail = {
+        "code": "large_ingestion_requires_confirmation",
+        "message": (
+            "Estimated chunks exceed the configured ingestion guard. "
+            "Retry with confirm_large_ingestion=true to proceed."
+        ),
+        "estimated_chunks": estimated_chunks,
+        "max_chunks": max_chunks,
+        "confirm_large_ingestion_required": True,
+    }
+    if preflight_id:
+        detail["preflight_id"] = preflight_id
+    raise HTTPException(status_code=400, detail=detail)
+
+
+def _chunk_estimation_step_for_process_options(rag: LightRAG, process_options: str) -> int:
+    """Resolve estimator step using per-doc chunk options when available."""
+    from lightrag.parser.routing import resolve_chunk_options
+
+    chunk_opts = resolve_chunk_options(rag.addon_params, process_options=process_options)
+    chunk_size = int(chunk_opts.get("chunk_token_size") or rag.chunk_token_size)
+    overlap = int(
+        (chunk_opts.get("fixed_token") or {}).get(
+            "chunk_overlap_token_size", rag.chunk_overlap_token_size
+        )
+    )
+    return max(chunk_size - overlap, 1)
+
+
+def _extract_text_for_preflight(file_bytes: bytes, ext: str) -> str | None:
+    """Reuse existing extractor helpers for a parser-backed preflight estimate."""
+    if ext in {
+        ".txt",
+        ".md",
+        ".mdx",
+        ".html",
+        ".htm",
+        ".tex",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".rtf",
+        ".odt",
+        ".epub",
+        ".csv",
+        ".log",
+        ".conf",
+        ".ini",
+        ".properties",
+        ".sql",
+        ".bat",
+        ".sh",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".py",
+        ".java",
+        ".js",
+        ".ts",
+        ".swift",
+        ".go",
+        ".rb",
+        ".php",
+        ".css",
+        ".scss",
+        ".less",
+    }:
+        return file_bytes.decode("utf-8")
+    if ext == ".pdf":
+        return _extract_pdf_pypdf(file_bytes, global_args.pdf_decrypt_password)
+    if ext == ".docx":
+        return _extract_docx(file_bytes)
+    if ext == ".pptx":
+        return _extract_pptx(file_bytes)
+    if ext == ".xlsx":
+        return _extract_xlsx(file_bytes)
+    return None
+
+
+async def _compute_file_sha256(file_path: Path) -> str:
+    hasher = hashlib.sha256()
+    async with aiofiles.open(file_path, "rb") as file:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+async def _compute_bytes_sha256(file_bytes: bytes) -> str:
+    return await asyncio.to_thread(lambda: hashlib.sha256(file_bytes).hexdigest())
+
+
+def _preflight_state_default() -> dict[str, Any]:
+    return {"entries": {}}
+
+
+def _cleanup_expired_preflight_entries(state: dict[str, Any]) -> None:
+    entries = state.get("entries")
+    if not isinstance(entries, dict):
+        state["entries"] = {}
+        return
+    now_ts = int(time.time())
+    expired_ids = [
+        preflight_id
+        for preflight_id, payload in entries.items()
+        if int(payload.get("expires_at_ts", 0)) <= now_ts
+    ]
+    for preflight_id in expired_ids:
+        entries.pop(preflight_id, None)
+
+    if len(entries) <= INGESTION_PREFLIGHT_MAX_ENTRIES:
+        return
+    ordered_ids = sorted(
+        entries.keys(), key=lambda key: int(entries[key].get("created_at_ts", 0))
+    )
+    for preflight_id in ordered_ids[: len(entries) - INGESTION_PREFLIGHT_MAX_ENTRIES]:
+        entries.pop(preflight_id, None)
+
+
+async def _store_preflight_entry(rag: LightRAG, entry: dict[str, Any]) -> None:
+    from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
+
+    state = await get_namespace_data(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    lock = get_namespace_lock(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    async with lock:
+        if not state:
+            state.update(_preflight_state_default())
+        _cleanup_expired_preflight_entries(state)
+        entries = state.setdefault("entries", {})
+        entries[entry["preflight_id"]] = entry
+
+
+async def _get_preflight_entry(rag: LightRAG, preflight_id: str) -> dict[str, Any] | None:
+    from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
+
+    state = await get_namespace_data(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    lock = get_namespace_lock(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    async with lock:
+        if not state:
+            return None
+        _cleanup_expired_preflight_entries(state)
+        entries = state.setdefault("entries", {})
+        return entries.get(preflight_id)
+
+
+async def _delete_preflight_entry(rag: LightRAG, preflight_id: str) -> None:
+    from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
+
+    state = await get_namespace_data(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    lock = get_namespace_lock(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    async with lock:
+        if not state:
+            return
+        entries = state.setdefault("entries", {})
+        entries.pop(preflight_id, None)
 
 
 def enforce_max_ingestion_chunks(
@@ -896,6 +1061,22 @@ class InsertResponse(BaseModel):
             }
         }
     )
+
+
+class UploadPreflightResponse(BaseModel):
+    """Response model for chunk-guard preflight estimation."""
+
+    preflight_id: str = Field(description="Short-lived token bound to this file payload")
+    estimated_chunks: int = Field(
+        description="Estimated chunk count computed from parser-extracted text"
+    )
+    max_chunks: Optional[int] = Field(
+        default=None, description="Configured MAX_INGESTION_CHUNKS threshold"
+    )
+    confirm_required: bool = Field(
+        description="Whether explicit confirmation is required before ingestion"
+    )
+    expires_at: str = Field(description="ISO timestamp when the preflight token expires")
 
 
 class ClearDocumentsResponse(BaseModel):
@@ -2546,6 +2727,43 @@ async def pipeline_index_file(
     except Exception as e:
         logger.error(f"Error indexing file {file_path.name}: {str(e)}")
         logger.error(traceback.format_exc())
+
+
+async def pipeline_index_file_with_preparsed_content(
+    rag: LightRAG,
+    file_path: Path,
+    content: str,
+    *,
+    track_id: str,
+    process_options: str,
+    admission_token: str | None = None,
+) -> None:
+    """Index a file using parser output prepared by upload preflight."""
+    enqueue_result = await rag.apipeline_enqueue_documents(
+        input=[content],
+        file_paths=[file_path.name],
+        track_id=track_id,
+        parse_engine=[PARSER_ENGINE_LEGACY],
+        process_options=[process_options or PROCESS_OPTION_CHUNK_FIXED],
+        from_scan=False,
+        admission_token=admission_token,
+    )
+    if enqueue_result is None:
+        try:
+            await move_file_to_parsed_dir(file_path)
+        except Exception as move_error:
+            logger.error(
+                f"Failed to move duplicate file {file_path.name} to {PARSED_DIR_NAME} directory: {move_error}"
+            )
+        return
+
+    try:
+        await move_file_to_parsed_dir(file_path)
+    except Exception as move_error:
+        logger.error(
+            f"Failed to move file {file_path.name} to {PARSED_DIR_NAME} directory: {move_error}"
+        )
+    await rag.apipeline_process_enqueue_documents()
 
 
 async def pipeline_enqueue_scan_batch(
@@ -5015,12 +5233,87 @@ def create_document_routes(
         )
 
     @router.post(
+        "/upload/preflight",
+        response_model=UploadPreflightResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def upload_preflight(file: UploadFile = File(...)):
+        """Parse and estimate chunks ahead of upload confirmation."""
+        safe_filename = sanitize_filename(file.filename, doc_manager.input_dir)
+        if not doc_manager.is_supported_file(safe_filename):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type. Supported types: {doc_manager.supported_extensions}",
+            )
+
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        _, process_options = resolve_file_parser_directives(Path(safe_filename))
+        normalized_process_options = (
+            sanitize_process_options(process_options) or PROCESS_OPTION_CHUNK_FIXED
+        )
+        step = _chunk_estimation_step_for_process_options(rag, normalized_process_options)
+
+        extracted_text: str | None = None
+        ext = Path(safe_filename).suffix.lower()
+        try:
+            extracted_text = await asyncio.to_thread(
+                _extract_text_for_preflight, file_bytes, ext
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Preflight text extraction failed for {safe_filename}, falling back to byte estimate: {exc}"
+            )
+            extracted_text = None
+
+        if extracted_text is not None:
+            token_count = len(rag.tokenizer.encode(extracted_text or ""))
+            estimated_chunks = estimate_chunk_count_from_tokens(token_count, step=step)
+        else:
+            estimated_tokens = max(1, math.ceil(len(file_bytes) / 4))
+            estimated_chunks = estimate_chunk_count_from_tokens(
+                estimated_tokens, step=step
+            )
+
+        max_chunks = resolve_max_ingestion_chunks()
+        confirm_required = bool(
+            max_chunks is not None and estimated_chunks > int(max_chunks)
+        )
+
+        now_ts = int(time.time())
+        expires_at_ts = now_ts + INGESTION_PREFLIGHT_TTL_SECONDS
+        preflight_id = f"preflight_{uuid4().hex[:16]}"
+        await _store_preflight_entry(
+            rag,
+            {
+                "preflight_id": preflight_id,
+                "file_name": safe_filename,
+                "file_sha256": await _compute_bytes_sha256(file_bytes),
+                "estimated_chunks": estimated_chunks,
+                "process_options": normalized_process_options,
+                "extracted_content": extracted_text,
+                "created_at_ts": now_ts,
+                "expires_at_ts": expires_at_ts,
+            },
+        )
+        return UploadPreflightResponse(
+            preflight_id=preflight_id,
+            estimated_chunks=estimated_chunks,
+            max_chunks=max_chunks,
+            confirm_required=confirm_required,
+            expires_at=datetime.fromtimestamp(expires_at_ts, tz=timezone.utc).isoformat(),
+        )
+
+    @router.post(
         "/upload", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
     )
     async def upload_to_input_dir(
         managed_tasks: set = Depends(get_managed_background_tasks),
         file: UploadFile = File(...),
         confirm_large_ingestion: bool = Form(False),
+        preflight_id: str | None = Form(default=None),
         http_request: Request = None,
     ):
         """
@@ -5117,6 +5410,27 @@ def create_document_routes(
 
             # Sanitize filename to prevent Path Traversal attacks
             safe_filename = sanitize_filename(file.filename, doc_manager.input_dir)
+            preflight_entry: dict[str, Any] | None = None
+            if preflight_id:
+                preflight_entry = await _get_preflight_entry(rag, preflight_id)
+                if not preflight_entry:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": "ingestion_preflight_not_found",
+                            "message": "Preflight token was not found or has expired. Run preflight again.",
+                            "preflight_id": preflight_id,
+                        },
+                    )
+                if preflight_entry.get("file_name") != safe_filename:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": "ingestion_preflight_file_mismatch",
+                            "message": "Preflight token does not match this filename.",
+                            "preflight_id": preflight_id,
+                        },
+                    )
 
             try:
                 filename_supported = doc_manager.is_supported_file(safe_filename)
@@ -5230,20 +5544,62 @@ def create_document_routes(
                     detail=f"File too large. Maximum size: {global_args.max_upload_size / 1024 / 1024:.1f}MB, uploaded: {bytes_written / 1024 / 1024:.1f}MB",
                 )
 
-            try:
-                await enforce_max_ingestion_chunks_for_file(
-                    rag,
-                    file_path,
-                    confirm_large_ingestion=confirm_large_ingestion,
-                )
-            except HTTPException:
-                try:
-                    file_path.unlink()
-                except Exception as cleanup_error:
-                    logger.error(
-                        f"Error cleaning up rejected large file {safe_filename}: {cleanup_error}"
+            max_chunks = resolve_max_ingestion_chunks()
+            preflight_extracted_content: str | None = None
+            process_options_for_preflight = PROCESS_OPTION_CHUNK_FIXED
+            if preflight_entry:
+                observed_file_hash = await _compute_file_sha256(file_path)
+                if observed_file_hash != preflight_entry.get("file_sha256"):
+                    try:
+                        file_path.unlink()
+                    except Exception as cleanup_error:
+                        logger.error(
+                            f"Error cleaning up mismatched preflight file {safe_filename}: {cleanup_error}"
+                        )
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": "ingestion_preflight_hash_mismatch",
+                            "message": "Uploaded file content does not match preflight token.",
+                            "preflight_id": preflight_id,
+                        },
                     )
-                raise
+                estimated_chunks = int(preflight_entry.get("estimated_chunks") or 0)
+                if (
+                    max_chunks is not None
+                    and estimated_chunks > max_chunks
+                    and not confirm_large_ingestion
+                ):
+                    try:
+                        file_path.unlink()
+                    except Exception as cleanup_error:
+                        logger.error(
+                            f"Error cleaning up rejected large file {safe_filename}: {cleanup_error}"
+                        )
+                    _raise_large_ingestion_error_with_preflight(
+                        estimated_chunks=estimated_chunks,
+                        max_chunks=max_chunks,
+                        preflight_id=preflight_id,
+                    )
+                preflight_extracted_content = preflight_entry.get("extracted_content")
+                process_options_for_preflight = (
+                    preflight_entry.get("process_options") or PROCESS_OPTION_CHUNK_FIXED
+                )
+            else:
+                try:
+                    await enforce_max_ingestion_chunks_for_file(
+                        rag,
+                        file_path,
+                        confirm_large_ingestion=confirm_large_ingestion,
+                    )
+                except HTTPException:
+                    try:
+                        file_path.unlink()
+                    except Exception as cleanup_error:
+                        logger.error(
+                            f"Error cleaning up rejected large file {safe_filename}: {cleanup_error}"
+                        )
+                    raise
 
             track_id = generate_track_id("upload")
 
@@ -5261,13 +5617,25 @@ def create_document_routes(
                 # cancellation therefore cannot strand the enqueue slot.
                 started.set()
                 try:
-                    await pipeline_index_file(
-                        rag,
-                        file_path,
-                        track_id,
-                        admission_token=enqueue_token,
-                    )
+                    if preflight_extracted_content is not None:
+                        await pipeline_index_file_with_preparsed_content(
+                            rag,
+                            file_path,
+                            preflight_extracted_content,
+                            track_id=track_id,
+                            process_options=process_options_for_preflight,
+                            admission_token=enqueue_token,
+                        )
+                    else:
+                        await pipeline_index_file(
+                            rag,
+                            file_path,
+                            track_id,
+                            admission_token=enqueue_token,
+                        )
                 finally:
+                    if preflight_id:
+                        await _delete_preflight_entry(rag, preflight_id)
                     await _release_enqueue_slot(rag, enqueue_token)
 
             async def _enqueue_backstop():

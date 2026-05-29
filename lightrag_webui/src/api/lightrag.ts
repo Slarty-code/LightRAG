@@ -236,6 +236,14 @@ export type DocActionResponse = {
   track_id?: string
 }
 
+export type UploadPreflightResponse = {
+  preflight_id: string
+  estimated_chunks: number
+  max_chunks: number | null
+  confirm_required: boolean
+  expires_at: string
+}
+
 export type ScanResponse = {
   status: 'scanning_started' | 'scanning_skipped_pipeline_busy'
   message: string
@@ -909,12 +917,15 @@ export const insertTexts = async (texts: string[]): Promise<DocActionResponse> =
 export const uploadDocument = async (
   file: File,
   onUploadProgress?: (percentCompleted: number) => void,
-  options?: { confirmLargeIngestion?: boolean }
+  options?: { confirmLargeIngestion?: boolean; preflightId?: string }
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   if (options?.confirmLargeIngestion) {
     formData.append('confirm_large_ingestion', 'true')
+  }
+  if (options?.preflightId) {
+    formData.append('preflight_id', options.preflightId)
   }
 
   const response = await axiosInstance.post('/documents/upload', formData, {
@@ -929,6 +940,19 @@ export const uploadDocument = async (
           onUploadProgress(percentCompleted)
         }
         : undefined
+  })
+  return response.data
+}
+
+export const uploadPreflight = async (
+  file: File
+): Promise<UploadPreflightResponse> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await axiosInstance.post('/documents/upload/preflight', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
   })
   return response.data
 }
@@ -1042,6 +1066,7 @@ export const cancelPipeline = async (): Promise<{
 }
 
 export const pauseIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
+  // UI label: "Stop Safely" (backend route remains /pause for compatibility).
   const response = await axiosInstance.post(
     `/api/ingestion/pause/${encodeURIComponent(jobId)}`
   )
@@ -1049,6 +1074,7 @@ export const pauseIngestion = async (jobId: string): Promise<IngestionControlRes
 }
 
 export const resumeIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
+  // UI label: "Start Over" (backend route remains /resume for compatibility).
   const response = await axiosInstance.post(
     `/api/ingestion/resume/${encodeURIComponent(jobId)}`
   )

@@ -8,7 +8,10 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from lightrag.api.routers import document_routes
-from lightrag.api.routers.document_routes import enforce_max_ingestion_chunks
+from lightrag.api.routers.document_routes import (
+    _raise_large_ingestion_error_with_preflight,
+    enforce_max_ingestion_chunks,
+)
 from lightrag.api.routers.ingestion_routes import (
     request_ingestion_pause,
     resume_ingestion_job,
@@ -116,6 +119,18 @@ def test_large_ingestion_guard_allows_explicit_confirmation(monkeypatch):
     )
 
     assert estimated_chunks == 3
+
+
+@pytest.mark.offline
+def test_large_ingestion_guard_error_includes_preflight_id():
+    with pytest.raises(HTTPException) as exc_info:
+        _raise_large_ingestion_error_with_preflight(
+            estimated_chunks=12, max_chunks=10, preflight_id="preflight_abc123"
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == "large_ingestion_requires_confirmation"
+    assert exc_info.value.detail["preflight_id"] == "preflight_abc123"
 
 
 @pytest.mark.offline
