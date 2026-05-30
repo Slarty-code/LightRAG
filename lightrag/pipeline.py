@@ -53,7 +53,7 @@ from lightrag.exceptions import (
     ChunkBlockMatchError,
     MultimodalAnalysisError,
     PipelineCancelledException,
-    PipelinePausedException,
+    PipelineStoppedException,
     PipelineRecoveryRequiredError,
     PipelineReservationConflictError,
     IndexFlushError,
@@ -1694,9 +1694,9 @@ class _PipelineMixin:
                     "cancellation_requested": False,
                     "cancellation_reason": None,
                     "cancellation_detail": None,
-                    "pause_requested": False,
-                    "paused": False,
-                    "paused_job_id": None,
+                    "stop_requested": False,
+                    "stopped": False,
+                    "stopped_job_id": None,
                     "latest_message": "",
                 },
             )
@@ -1861,12 +1861,12 @@ class _PipelineMixin:
                         # cancel stops the WHOLE run and the mailbox is fully
                         # retained for the next explicit trigger.
                         return
-                    if pipeline_status.get("pause_requested", False):
+                    if pipeline_status.get("stop_requested", False):
                         pipeline_status["request_pending"] = False
-                        pipeline_status["pause_requested"] = False
-                        pipeline_status["paused"] = True
+                        pipeline_status["stop_requested"] = False
+                        pipeline_status["stopped"] = True
 
-                        log_message = "Pipeline paused by user"
+                        log_message = "Pipeline stopped safely by user"
                         logger.info(log_message)
                         pipeline_status["latest_message"] = log_message
                         append_pipeline_history(pipeline_status, log_message)
@@ -2132,17 +2132,17 @@ class _PipelineMixin:
                             self._cancellation_label(status_snapshot)
                         )
                         logger.error(internal_halt)
-                    was_paused = bool(
-                        status_snapshot.get("paused", False)
-                        or status_snapshot.get("pause_requested", False)
+                    was_stopped = bool(
+                        status_snapshot.get("stopped", False)
+                        or status_snapshot.get("stop_requested", False)
                     )
                     updates.update(
                         {
                             "cancellation_requested": False,
                             "cancellation_reason": None,
                             "cancellation_detail": None,
-                            "pause_requested": False,
-                            "paused": was_paused,
+                            "stop_requested": False,
+                            "stopped": was_stopped,
                             "latest_message": internal_halt
                             if internal_halt
                             else stopped_message,
@@ -2154,7 +2154,6 @@ class _PipelineMixin:
                         append_pipeline_history(status_snapshot, internal_halt)
 
             await run_to_completion(_finalize)
-
     # ============================================================
     # Pipeline orchestration
     # ============================================================
@@ -4177,10 +4176,10 @@ class _PipelineMixin:
                         pipeline_status_lock=ctx.pipeline_status_lock,
                     )
                     continue
-                if await self._pause_requested(
+                if await self._stop_requested(
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 ):
-                    await self._mark_doc_paused_in_stage(
+                    await self._mark_doc_stopped_in_stage(
                         ctx=ctx,
                         doc_id=doc_id_w,
                         status_doc=status_doc_w,
@@ -4552,10 +4551,10 @@ class _PipelineMixin:
                         pipeline_status_lock=ctx.pipeline_status_lock,
                     )
                     continue
-                if await self._pause_requested(
+                if await self._stop_requested(
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 ):
-                    await self._mark_doc_paused_in_stage(
+                    await self._mark_doc_stopped_in_stage(
                         ctx=ctx,
                         doc_id=doc_id_w,
                         status_doc=status_doc_w,
@@ -4764,7 +4763,7 @@ class _PipelineMixin:
                 await self._raise_if_cancelled(
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 )
-                await self._raise_if_paused(
+                await self._raise_if_stop_requested(
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 )
 
@@ -5247,7 +5246,7 @@ class _PipelineMixin:
                 await self._raise_if_cancelled(
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 )
-                await self._raise_if_paused(
+                await self._raise_if_stop_requested(
                     ctx.pipeline_status, ctx.pipeline_status_lock
                 )
 
@@ -5332,7 +5331,7 @@ class _PipelineMixin:
                     await self._raise_if_cancelled(
                         ctx.pipeline_status, ctx.pipeline_status_lock
                     )
-                    await self._raise_if_paused(
+                    await self._raise_if_stop_requested(
                         ctx.pipeline_status, ctx.pipeline_status_lock
                     )
 
@@ -5722,15 +5721,15 @@ class _PipelineMixin:
             f"queued (PENDING/FAILED)."
         )
 
-    async def _raise_if_paused(
+    async def _raise_if_stop_requested(
         self,
         pipeline_status: dict,
         pipeline_status_lock,
     ) -> None:
-        """Raise ``PipelinePausedException`` if the user has requested pause."""
+        """Raise ``PipelineStoppedException`` if the user requested a safe stop."""
         async with pipeline_status_lock:
-            if pipeline_status.get("pause_requested", False):
-                raise PipelinePausedException("User paused")
+            if pipeline_status.get("stop_requested", False):
+                raise PipelineStoppedException("User stopped safely")
 
     async def _cancellation_requested(
         self,
@@ -5771,13 +5770,13 @@ class _PipelineMixin:
                 persist_error,
             )
 
-    async def _pause_requested(
+    async def _stop_requested(
         self,
         pipeline_status: dict,
         pipeline_status_lock,
     ) -> bool:
         async with pipeline_status_lock:
-            return bool(pipeline_status.get("pause_requested", False))
+            return bool(pipeline_status.get("stop_requested", False))
 
     async def _mark_doc_cancelled_in_stage(
         self,
@@ -5824,7 +5823,7 @@ class _PipelineMixin:
         except Exception as exc:
             logger.error(f"Failed to mark cancelled doc {doc_id} as FAILED: {exc}")
 
-    async def _mark_doc_paused_in_stage(
+    async def _mark_doc_stopped_in_stage(
         self,
         *,
         doc_id: str,
@@ -5835,26 +5834,26 @@ class _PipelineMixin:
         pipeline_status: dict,
         pipeline_status_lock,
     ) -> None:
-        error_msg = f"User paused during {stage_label}: {file_path}"
+        error_msg = f"User stopped safely during {stage_label}: {file_path}"
         logger.info(error_msg)
         async with pipeline_status_lock:
             pipeline_status["latest_message"] = error_msg
             append_pipeline_history(pipeline_status, error_msg)
         await self._persist_llm_response_cache_best_effort(
-            stage_label=f"{stage_label} pause",
+            stage_label=f"{stage_label} stop",
             doc_id=doc_id,
         )
         try:
             await self._upsert_doc_status_transition(
                 ctx=ctx,
                 doc_id=doc_id,
-                status=DocStatus.PAUSED,
+                status=DocStatus.STOPPED,
                 status_doc=status_doc,
                 file_path=file_path,
                 extra_fields={"error_msg": error_msg},
             )
         except Exception as exc:
-            logger.error(f"Failed to mark paused doc {doc_id} as PAUSED: {exc}")
+            logger.error(f"Failed to mark stopped doc {doc_id} as STOPPED: {exc}")
 
     async def _finalize_doc_failure(
         self,
@@ -5907,16 +5906,16 @@ class _PipelineMixin:
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = error_msg
                 append_pipeline_history(pipeline_status, error_msg)
-        elif isinstance(error, PipelinePausedException):
+        elif isinstance(error, PipelineStoppedException):
             doc_error_msg = str(error)
             if stage_label == "merge":
                 error_msg = (
-                    f"User paused before merge {current_file_number}/"
+                    f"User stopped safely before merge {current_file_number}/"
                     f"{total_files}: {file_path}"
                 )
             else:
                 error_msg = (
-                    f"User paused {current_file_number}/{total_files}: {file_path}"
+                    f"User stopped safely {current_file_number}/{total_files}: {file_path}"
                 )
             logger.info(error_msg)
             async with pipeline_status_lock:
@@ -5952,8 +5951,8 @@ class _PipelineMixin:
 
         failed_chunks_list, failed_chunks_count = failed_chunks_snapshot
         target_status = (
-            DocStatus.PAUSED
-            if isinstance(error, PipelinePausedException)
+            DocStatus.STOPPED
+            if isinstance(error, PipelineStoppedException)
             else DocStatus.FAILED
         )
         await self._upsert_doc_status_transition(

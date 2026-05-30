@@ -13,8 +13,8 @@ from lightrag.api.routers.document_routes import (
     enforce_max_ingestion_chunks,
 )
 from lightrag.api.routers.ingestion_routes import (
-    request_ingestion_pause,
-    resume_ingestion_job,
+    request_ingestion_stop,
+    start_over_ingestion_job,
 )
 from lightrag.base import DocProcessingStatus, DocStatus
 from lightrag.kg.shared_storage import (
@@ -135,37 +135,37 @@ def test_large_ingestion_guard_error_includes_preflight_id():
 
 @pytest.mark.offline
 @pytest.mark.asyncio
-async def test_pause_marks_queued_job_documents_paused():
-    workspace = "test_pause_marks_queued"
+async def test_stop_marks_queued_job_documents_stopped():
+    workspace = "test_stop_marks_queued"
     initialize_share_data()
     try:
         await initialize_pipeline_status(workspace)
         doc_status = MemoryDocStatus({"doc-1": make_doc(DocStatus.PENDING)})
         rag = ControlRAG(workspace, doc_status)
 
-        response = await request_ingestion_pause(rag, "job-1")
+        response = await request_ingestion_stop(rag, "job-1")
 
-        assert response.status == "paused"
-        assert doc_status.docs["doc-1"].status == DocStatus.PAUSED
-        assert doc_status.docs["doc-1"].error_msg == "Paused by user request"
+        assert response.status == "stopped"
+        assert doc_status.docs["doc-1"].status == DocStatus.STOPPED
+        assert doc_status.docs["doc-1"].error_msg == "Stopped safely by user request"
     finally:
         finalize_share_data()
 
 
 @pytest.mark.offline
 @pytest.mark.asyncio
-async def test_resume_requeues_paused_job_documents():
-    workspace = "test_resume_requeues_paused"
+async def test_start_over_requeues_stopped_job_documents():
+    workspace = "test_start_over_requeues_stopped"
     initialize_share_data()
     try:
         await initialize_pipeline_status(workspace)
-        doc_status = MemoryDocStatus({"doc-1": make_doc(DocStatus.PAUSED)})
+        doc_status = MemoryDocStatus({"doc-1": make_doc(DocStatus.STOPPED)})
         rag = ControlRAG(workspace, doc_status)
         background_tasks = BackgroundTasks()
 
-        response = await resume_ingestion_job(rag, "job-1", background_tasks)
+        response = await start_over_ingestion_job(rag, "job-1", background_tasks)
 
-        assert response.status == "resume_started"
+        assert response.status == "start_over_started"
         assert doc_status.docs["doc-1"].status == DocStatus.PENDING
         assert doc_status.docs["doc-1"].error_msg is None
         assert len(background_tasks.tasks) == 1
@@ -175,8 +175,8 @@ async def test_resume_requeues_paused_job_documents():
 
 @pytest.mark.offline
 @pytest.mark.asyncio
-async def test_pause_active_job_sets_pipeline_pause_flag():
-    workspace = "test_pause_active_job"
+async def test_stop_active_job_sets_pipeline_stop_flag():
+    workspace = "test_stop_active_job"
     initialize_share_data()
     try:
         await initialize_pipeline_status(workspace)
@@ -194,11 +194,11 @@ async def test_pause_active_job_sets_pipeline_pause_flag():
             pipeline_status["active_track_ids"] = ["job-1"]
             pipeline_status["history_messages"][:] = []
 
-        response = await request_ingestion_pause(rag, "job-1")
+        response = await request_ingestion_stop(rag, "job-1")
 
-        assert response.status == "pause_requested"
+        assert response.status == "stop_requested"
         async with pipeline_status_lock:
-            assert pipeline_status["pause_requested"] is True
-            assert pipeline_status["paused_job_id"] == "job-1"
+            assert pipeline_status["stop_requested"] is True
+            assert pipeline_status["stopped_job_id"] == "job-1"
     finally:
         finalize_share_data()

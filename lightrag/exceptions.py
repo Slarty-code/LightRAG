@@ -404,10 +404,10 @@ class IndexFlushError(Exception):
         super().__init__(f"{storage_name}[{namespace}] index flush failed: {cause}")
 
 
-class PipelinePausedException(Exception):
-    """Raised when pipeline processing is paused by user request."""
+class PipelineStoppedException(Exception):
+    """Raised when pipeline processing is stopped safely by user request."""
 
-    def __init__(self, message: str = "User paused"):
+    def __init__(self, message: str = "User stopped safely"):
         super().__init__(message)
         self.message = message
 

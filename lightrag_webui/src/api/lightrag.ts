@@ -264,7 +264,7 @@ export type DeleteDocResponse = {
 
 export type DocStatus =
   | 'pending'
-  | 'paused'
+  | 'stopped'
   | 'parsing'
   | 'analyzing'
   | 'processing'
@@ -345,9 +345,9 @@ export type PipelineStatusResponse = {
   batchs: number
   cur_batch: number
   cancellation_requested?: boolean
-  pause_requested?: boolean
-  paused?: boolean
-  paused_job_id?: string | null
+  stop_requested?: boolean
+  stopped?: boolean
+  stopped_job_id?: string | null
   active_track_ids?: string[] | null
   latest_message: string
   history_messages?: string[]
@@ -356,13 +356,13 @@ export type PipelineStatusResponse = {
 
 export type IngestionControlResponse = {
   status:
-    | 'pause_requested'
-    | 'paused'
-    | 'already_paused'
-    | 'resume_started'
+    | 'stop_requested'
+    | 'stopped'
+    | 'already_stopped'
+    | 'start_over_started'
     | 'already_running'
     | 'not_busy'
-    | 'not_paused'
+    | 'not_stopped'
   message: string
   job_id: string
 }
@@ -1065,18 +1065,16 @@ export const cancelPipeline = async (): Promise<{
   return response.data
 }
 
-export const pauseIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
-  // UI label: "Stop Safely" (backend route remains /pause for compatibility).
+export const stopIngestionSafely = async (jobId: string): Promise<IngestionControlResponse> => {
   const response = await axiosInstance.post(
-    `/api/ingestion/pause/${encodeURIComponent(jobId)}`
+    `/api/ingestion/stop/${encodeURIComponent(jobId)}`
   )
   return response.data
 }
 
-export const resumeIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
-  // UI label: "Start Over" (backend route remains /resume for compatibility).
+export const startOverIngestion = async (jobId: string): Promise<IngestionControlResponse> => {
   const response = await axiosInstance.post(
-    `/api/ingestion/resume/${encodeURIComponent(jobId)}`
+    `/api/ingestion/start-over/${encodeURIComponent(jobId)}`
   )
   return response.data
 }

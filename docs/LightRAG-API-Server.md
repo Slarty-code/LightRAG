@@ -1255,14 +1255,14 @@ This endpoint provides comprehensive status information including:
 * Error messages if processing failed
 * Timestamps for creation and updates
 
-### Ingestion stop/start-over controls and large-ingestion guard
+### Ingestion stop-safely / start-over controls and large-ingestion guard
 
-**Stop Safely / Start Over semantics** (non-destructive alternative to `POST /documents/cancel_pipeline`):
+**Stop Safely / Start Over** (non-destructive alternative to `POST /documents/cancel_pipeline`):
 
-* `POST /api/ingestion/pause/{track_id}` — cooperative safe-stop at the next checkpoint; in-flight documents may be marked `paused`
-* `POST /api/ingestion/resume/{track_id}` — Start Over behavior: re-queues `paused` documents as `pending` and reprocesses them from the beginning
+* `POST /api/ingestion/stop/{track_id}` — cooperative safe-stop at the next checkpoint; in-flight documents are marked `stopped`
+* `POST /api/ingestion/start-over/{track_id}` — re-queues `stopped` documents as `pending` and reprocesses each from the beginning (not checkpoint resume)
 
-`track_id` is the value returned from upload or text insert endpoints. Use `GET /documents/pipeline_status` to read `pause_requested`, `paused`, `paused_job_id`, and `active_track_ids`.
+`track_id` is the value returned from upload or text insert endpoints. Use `GET /documents/pipeline_status` to read `stop_requested`, `stopped`, `stopped_job_id`, and `active_track_ids`.
 
 **Large-ingestion chunk guard** (complements byte limit `MAX_UPLOAD_SIZE`):
 

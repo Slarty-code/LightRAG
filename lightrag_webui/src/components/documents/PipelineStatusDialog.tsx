@@ -14,8 +14,8 @@ import Button from '@/components/ui/Button'
 import {
   getPipelineStatus,
   cancelPipeline,
-  pauseIngestion,
-  resumeIngestion,
+  stopIngestionSafely,
+  startOverIngestion,
   PipelineStatusResponse
 } from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
@@ -41,7 +41,7 @@ export default function PipelineStatusDialog({
   const historyRef = useRef<HTMLDivElement>(null)
 
   const activeJobId =
-    status?.paused_job_id ??
+    status?.stopped_job_id ??
     (status?.active_track_ids?.length
       ? status.active_track_ids[status.active_track_ids.length - 1]
       : null)
@@ -116,17 +116,17 @@ export default function PipelineStatusDialog({
     }
   }
 
-  const handleConfirmPause = async () => {
+  const handleConfirmStop = async () => {
     setShowPauseConfirm(false)
     if (!activeJobId) {
       toast.error(t('documentPanel.pipelineStatus.pauseNoJob'))
       return
     }
     try {
-      const result = await pauseIngestion(activeJobId)
-      if (result.status === 'pause_requested' || result.status === 'paused') {
+      const result = await stopIngestionSafely(activeJobId)
+      if (result.status === 'stop_requested' || result.status === 'stopped') {
         toast.success(t('documentPanel.pipelineStatus.pauseSuccess'))
-      } else if (result.status === 'already_paused') {
+      } else if (result.status === 'already_stopped') {
         toast.info(t('documentPanel.pipelineStatus.pauseAlready'))
       } else {
         toast.info(result.message)
@@ -136,14 +136,14 @@ export default function PipelineStatusDialog({
     }
   }
 
-  const handleResume = async () => {
+  const handleStartOver = async () => {
     if (!activeJobId) {
       toast.error(t('documentPanel.pipelineStatus.pauseNoJob'))
       return
     }
     try {
-      const result = await resumeIngestion(activeJobId)
-      if (result.status === 'resume_started') {
+      const result = await startOverIngestion(activeJobId)
+      if (result.status === 'start_over_started') {
         toast.success(t('documentPanel.pipelineStatus.resumeSuccess'))
       } else if (result.status === 'already_running') {
         toast.info(t('documentPanel.pipelineStatus.resumeQueued'))
@@ -156,13 +156,15 @@ export default function PipelineStatusDialog({
   }
 
   const canCancel = status?.busy === true && !status?.cancellation_requested
-  const canPause =
+  const canStopSafely =
     Boolean(activeJobId) &&
     status?.busy === true &&
     !status?.cancellation_requested &&
-    !status?.pause_requested &&
-    !status?.paused
-  const canResume = Boolean(activeJobId) && (status?.paused === true || status?.pause_requested === true)
+    !status?.stop_requested &&
+    !status?.stopped
+  const canStartOver =
+    Boolean(activeJobId) &&
+    (status?.stopped === true || status?.stop_requested === true)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -240,13 +242,13 @@ export default function PipelineStatusDialog({
                   <div className="h-2 w-2 rounded-full bg-red-500" />
                 </div>
               )}
-              {status?.pause_requested && (
+              {status?.stop_requested && (
                 <div className="flex items-center gap-2">
                   <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.pauseRequested')}:</div>
                   <div className="h-2 w-2 rounded-full bg-amber-500" />
                 </div>
               )}
-              {status?.paused && (
+              {status?.stopped && (
                 <div className="flex items-center gap-2">
                   <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.paused')}:</div>
                   <div className="h-2 w-2 rounded-full bg-amber-500" />
@@ -259,19 +261,19 @@ export default function PipelineStatusDialog({
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!canPause}
+                  disabled={!canStopSafely}
                   onClick={() => setShowPauseConfirm(true)}
                   title={t('documentPanel.pipelineStatus.pauseTooltip')}
                 >
                   {t('documentPanel.pipelineStatus.pauseButton')}
                 </Button>
               )}
-              {(status?.busy || status?.paused) && (
+              {(status?.busy || status?.stopped) && (
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!canResume}
-                  onClick={handleResume}
+                  disabled={!canStartOver}
+                  onClick={handleStartOver}
                   title={t('documentPanel.pipelineStatus.resumeTooltip')}
                 >
                   {t('documentPanel.pipelineStatus.resumeButton')}
@@ -294,7 +296,7 @@ export default function PipelineStatusDialog({
               )}
             </div>
           </div>
-          {(status?.paused || status?.pause_requested) && (
+          {(status?.stopped || status?.stop_requested) && (
             <div className="text-xs text-muted-foreground">
               {t('documentPanel.pipelineStatus.resumeHint')}
             </div>
@@ -348,7 +350,7 @@ export default function PipelineStatusDialog({
             <Button variant="outline" onClick={() => setShowPauseConfirm(false)}>
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleConfirmPause}>
+            <Button onClick={handleConfirmStop}>
               {t('documentPanel.pipelineStatus.pauseConfirmButton')}
             </Button>
           </div>

@@ -1602,9 +1602,9 @@ class PipelineStatusResponse(BaseModel):
     batchs: int = 0
     cur_batch: int = 0
     request_pending: bool = False
-    pause_requested: bool = False
-    paused: bool = False
-    paused_job_id: Optional[str] = None
+    stop_requested: bool = False
+    stopped: bool = False
+    stopped_job_id: Optional[str] = None
     active_track_ids: Optional[List[str]] = None
     latest_message: str = ""
     history_messages: Optional[List[str]] = None
@@ -6405,9 +6405,16 @@ def create_document_routes(
                 # Use format_datetime to ensure consistent formatting
                 status_dict["job_start"] = format_datetime(status_dict["job_start"])
 
-            status_dict.setdefault("pause_requested", False)
-            status_dict.setdefault("paused", False)
-            status_dict.setdefault("paused_job_id", None)
+            for legacy_key, key in (
+                ("pause_requested", "stop_requested"),
+                ("paused", "stopped"),
+                ("paused_job_id", "stopped_job_id"),
+            ):
+                if legacy_key in status_dict:
+                    status_dict.setdefault(key, status_dict[legacy_key])
+            status_dict.setdefault("stop_requested", False)
+            status_dict.setdefault("stopped", False)
+            status_dict.setdefault("stopped_job_id", None)
             status_dict.setdefault("active_track_ids", None)
             return PipelineStatusResponse(**status_dict)
         except Exception as e:
@@ -6445,7 +6452,7 @@ def create_document_routes(
                 DocStatus.PROCESSING,
                 DocStatus.PREPROCESSED,
                 DocStatus.PROCESSED,
-                DocStatus.PAUSED,
+                DocStatus.STOPPED,
                 DocStatus.FAILED,
             )
 
