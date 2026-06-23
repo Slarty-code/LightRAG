@@ -8,7 +8,11 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from lightrag.api.routers import document_routes
-from lightrag.api.routers.document_routes import enforce_max_ingestion_chunks
+from lightrag.api.routers.document_routes import (
+    TextChunkingConfig,
+    enforce_max_ingestion_chunks,
+    estimate_chunk_count_for_texts,
+)
 from lightrag.api.routers.ingestion_routes import (
     request_ingestion_pause,
     resume_ingestion_job,
@@ -32,6 +36,7 @@ class GuardRAG:
     chunk_token_size = 5
     chunk_overlap_token_size = 1
     tokenizer = WhitespaceTokenizer()
+    addon_params: dict = {}
 
 
 class MemoryDocStatus:
@@ -118,6 +123,99 @@ def test_large_ingestion_guard_allows_explicit_confirmation(monkeypatch):
     )
 
     assert estimated_chunks == 3
+
+
+@pytest.mark.offline
+def test_chunk_guard_respects_request_chunk_token_size(monkeypatch):
+    """Smaller per-request chunk windows must raise the estimated chunk count."""
+    monkeypatch.setattr(document_routes.global_args, "max_ingestion_chunks", 4)
+    rag = GuardRAG()
+    text = "one two three four five six seven eight nine"
+
+    default_estimate = estimate_chunk_count_for_texts(rag, [text])
+    small_chunk_estimate = estimate_chunk_count_for_texts(
+        rag,
+        [text],
+        chunking=TextChunkingConfig(
+            strategy="fixed_token",
+            params={"chunk_token_size": 3, "chunk_overlap_token_size": 1},
+        ),
+    )
+
+    assert small_chunk_estimate > default_estimate
+
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_max_ingestion_chunks(
+            rag,
+            [text],
+            chunking=TextChunkingConfig(
+                strategy="fixed_token",
+                params={"chunk_token_size": 3, "chunk_overlap_token_size": 1},
+            ),
+            confirm_large_ingestion=False,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["estimated_chunks"] == small_chunk_estimate
+
+
+@pytest.mark.offline
+def test_chunk_guard_semantic_strategy_is_conservative():
+    """Semantic strategies apply a conservative multiplier to avoid under-guarding."""
+    rag = GuardRAG()
+    text = "one two three four five six seven eight nine"
+    fixed = estimate_chunk_count_for_texts(
+        rag,
+        [text],
+        chunking=TextChunkingConfig(
+            strategy="fixed_token",
+            params={"chunk_token_size": 5, "chunk_overlap_token_size": 1},
+        ),
+    )
+    semantic = estimate_chunk_count_for_texts(
+        rag,
+        [text],
+        chunking=TextChunkingConfig(
+            strategy="semantic_vector",
+            params={"chunk_token_size": 5},
+        ),
+    )
+
+    assert semantic >= fixed * 2
+
+
+@pytest.mark.offline
+def test_chunk_guard_delimiter_split_estimate():
+    """Delimiter-only fixed-token chunking estimates one chunk per segment."""
+    rag = GuardRAG()
+    text = "aaa bbb ccc ddd"
+
+    estimate = estimate_chunk_count_for_texts(
+        rag,
+        [text],
+        chunking=TextChunkingConfig(
+            strategy="fixed_token",
+            params={
+                "chunk_token_size": 10,
+                "split_by_character": " ",
+                "split_by_character_only": True,
+            },
+        ),
+    )
+
+    assert estimate == 4
+
+
+@pytest.mark.offline
+def test_chunk_guard_sums_multiple_texts(monkeypatch):
+    monkeypatch.setattr(document_routes.global_args, "max_ingestion_chunks", 2)
+    rag = GuardRAG()
+    texts = ["one two three four five six seven eight nine", "ten eleven twelve"]
+
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_max_ingestion_chunks(rag, texts, confirm_large_ingestion=False)
+
+    assert exc_info.value.detail["estimated_chunks"] > 2
 
 
 @pytest.mark.offline

@@ -130,6 +130,16 @@ def resolve_max_ingestion_chunks(max_chunks_override: int | None = None) -> int 
     return max_chunks
 
 
+# Conservative multipliers so variable-cost strategies (semantic / paragraph)
+# do not under-estimate chunk counts and bypass the guard.
+_CHUNK_GUARD_STRATEGY_MULTIPLIERS: dict[str, float] = {
+    "fixed_token": 1.0,
+    "recursive_character": 1.25,
+    "semantic_vector": 2.0,
+    "paragraph_semantic": 1.5,
+}
+
+
 def estimate_chunk_count_from_tokens(token_count: int, *, step: int) -> int:
     """Estimate chunk count from token count for the default token splitter."""
     if token_count <= 0:
@@ -137,36 +147,167 @@ def estimate_chunk_count_from_tokens(token_count: int, *, step: int) -> int:
     return math.ceil(token_count / step)
 
 
-def estimate_chunk_count_for_texts(
-    rag: LightRAG, texts: list[str], *, chunk_token_size: int | None = None
+def _effective_chunk_size_overlap(
+    rag: LightRAG,
+    chunk_options: dict,
+    strategy_key: str,
+) -> tuple[int, int]:
+    """Return effective (chunk_token_size, overlap) for guard estimation."""
+    sub = chunk_options.get(strategy_key) or {}
+    size = sub.get("chunk_token_size") or chunk_options.get("chunk_token_size")
+    if size is None:
+        size = int(rag.chunk_token_size)
+    else:
+        size = int(size)
+
+    overlap = sub.get("chunk_overlap_token_size")
+    if overlap is None:
+        overlap = int(rag.chunk_overlap_token_size)
+    else:
+        overlap = int(overlap)
+
+    if (
+        strategy_key == "fixed_token"
+        and sub.get("split_by_character")
+        and sub.get("split_by_character_only")
+    ):
+        overlap = 0
+
+    return size, overlap
+
+
+def _estimate_delimiter_split_chunks(
+    rag: LightRAG,
+    text: str,
+    *,
+    separator: str,
+    chunk_size: int,
+    split_by_character_only: bool,
+    overlap: int,
 ) -> int:
-    """Estimate chunks using the same tokenizer and chunk window as ingestion."""
-    chunk_size = chunk_token_size or int(rag.chunk_token_size)
-    overlap = int(rag.chunk_overlap_token_size)
+    """Estimate chunks when fixed-token splitting uses a delimiter pre-pass."""
+    if not text:
+        return 0
+
+    segments = text.split(separator)
+    step = max(chunk_size - overlap, 1)
+    total = 0
+    for segment in segments:
+        token_count = len(rag.tokenizer.encode(segment))
+        if token_count <= 0:
+            continue
+        if split_by_character_only:
+            if token_count > chunk_size:
+                total += estimate_chunk_count_from_tokens(token_count, step=step)
+            else:
+                total += 1
+        else:
+            total += estimate_chunk_count_from_tokens(token_count, step=step)
+    return total
+
+
+def _resolved_chunking_for_guard(
+    rag: LightRAG,
+    chunking: Optional["TextChunkingConfig"],
+    process_options: str | None,
+    chunk_options: dict | None,
+) -> tuple[str, dict]:
+    """Reuse a pre-resolved snapshot when the route already validated chunking."""
+    if process_options is not None and chunk_options is not None:
+        return process_options, chunk_options
+    addon_params = getattr(rag, "addon_params", None)
+    if chunking is None:
+        process_options = PROCESS_OPTION_CHUNK_FIXED
+        return process_options, resolve_chunk_options(
+            addon_params, process_options=process_options
+        )
+    process_options = _STRATEGY_TO_PROCESS_OPTION[chunking.strategy]
+    resolved = resolve_chunk_options(addon_params, process_options=process_options)
+    strategy_key = chunk_strategy_key(process_options)
+    resolved[strategy_key].update(chunking.params)
+    if "chunk_token_size" in chunking.params:
+        resolved["chunk_token_size"] = chunking.params["chunk_token_size"]
+    return process_options, resolved
+
+
+def estimate_chunk_count_for_texts(
+    rag: LightRAG,
+    texts: list[str],
+    *,
+    chunking: Optional["TextChunkingConfig"] = None,
+    process_options: str | None = None,
+    chunk_options: dict | None = None,
+) -> int:
+    """Estimate chunks using resolved chunking options when available."""
+    resolved_process_options, resolved_chunk_options = _resolved_chunking_for_guard(
+        rag, chunking, process_options, chunk_options
+    )
+    strategy_key = chunk_strategy_key(resolved_process_options)
+    sub = resolved_chunk_options.get(strategy_key) or {}
+    chunk_size, overlap = _effective_chunk_size_overlap(
+        rag, resolved_chunk_options, strategy_key
+    )
+    multiplier = _CHUNK_GUARD_STRATEGY_MULTIPLIERS.get(strategy_key, 1.0)
     step = max(chunk_size - overlap, 1)
 
     total_chunks = 0
     for text in texts:
-        token_count = len(rag.tokenizer.encode(text or ""))
-        total_chunks += estimate_chunk_count_from_tokens(token_count, step=step)
+        if (
+            strategy_key == "fixed_token"
+            and sub.get("split_by_character")
+        ):
+            raw_estimate = _estimate_delimiter_split_chunks(
+                rag,
+                text or "",
+                separator=str(sub["split_by_character"]),
+                chunk_size=chunk_size,
+                split_by_character_only=bool(sub.get("split_by_character_only")),
+                overlap=overlap,
+            )
+        else:
+            token_count = len(rag.tokenizer.encode(text or ""))
+            raw_estimate = estimate_chunk_count_from_tokens(token_count, step=step)
+
+        total_chunks += max(0, math.ceil(raw_estimate * multiplier))
     return total_chunks
 
 
-async def estimate_chunk_count_for_file(rag: LightRAG, file_path: Path) -> int:
+async def estimate_chunk_count_for_file(
+    rag: LightRAG,
+    file_path: Path,
+    *,
+    chunking: Optional["TextChunkingConfig"] = None,
+    process_options: str | None = None,
+    chunk_options: dict | None = None,
+) -> int:
     """Estimate chunks for an uploaded file before scheduling background ingestion."""
     async with aiofiles.open(file_path, "rb") as file:
         file_bytes = await file.read()
 
     try:
         text = file_bytes.decode("utf-8")
-        return estimate_chunk_count_for_texts(rag, [text])
+        return estimate_chunk_count_for_texts(
+            rag,
+            [text],
+            chunking=chunking,
+            process_options=process_options,
+            chunk_options=chunk_options,
+        )
     except UnicodeDecodeError:
         # Binary formats are parsed in the background. Use a conservative byte-based
         # estimate so obviously large uploads still require explicit confirmation.
+        resolved_process_options, resolved_chunk_options = _resolved_chunking_for_guard(
+            rag, chunking, process_options, chunk_options
+        )
+        strategy_key = chunk_strategy_key(resolved_process_options)
+        chunk_size, overlap = _effective_chunk_size_overlap(
+            rag, resolved_chunk_options, strategy_key
+        )
+        multiplier = _CHUNK_GUARD_STRATEGY_MULTIPLIERS.get(strategy_key, 1.0)
         estimated_tokens = max(1, math.ceil(len(file_bytes) / 4))
-        chunk_size = int(rag.chunk_token_size)
-        step = max(chunk_size - int(rag.chunk_overlap_token_size), 1)
-        return estimate_chunk_count_from_tokens(estimated_tokens, step=step)
+        step = max(chunk_size - overlap, 1)
+        raw_estimate = estimate_chunk_count_from_tokens(estimated_tokens, step=step)
+        return max(0, math.ceil(raw_estimate * multiplier))
 
 
 def _raise_large_ingestion_error(estimated_chunks: int, max_chunks: int) -> None:
@@ -191,10 +332,19 @@ def enforce_max_ingestion_chunks(
     *,
     confirm_large_ingestion: bool = False,
     max_chunks_override: int | None = None,
+    chunking: Optional["TextChunkingConfig"] = None,
+    process_options: str | None = None,
+    chunk_options: dict | None = None,
 ) -> int:
     """Reject oversized API text ingestion unless explicitly confirmed."""
     max_chunks = resolve_max_ingestion_chunks(max_chunks_override)
-    estimated_chunks = estimate_chunk_count_for_texts(rag, texts)
+    estimated_chunks = estimate_chunk_count_for_texts(
+        rag,
+        texts,
+        chunking=chunking,
+        process_options=process_options,
+        chunk_options=chunk_options,
+    )
     if (
         max_chunks is not None
         and estimated_chunks > max_chunks
@@ -210,10 +360,19 @@ async def enforce_max_ingestion_chunks_for_file(
     *,
     confirm_large_ingestion: bool = False,
     max_chunks_override: int | None = None,
+    chunking: Optional["TextChunkingConfig"] = None,
+    process_options: str | None = None,
+    chunk_options: dict | None = None,
 ) -> int:
     """Reject oversized file uploads before scheduling ingestion."""
     max_chunks = resolve_max_ingestion_chunks(max_chunks_override)
-    estimated_chunks = await estimate_chunk_count_for_file(rag, file_path)
+    estimated_chunks = await estimate_chunk_count_for_file(
+        rag,
+        file_path,
+        chunking=chunking,
+        process_options=process_options,
+        chunk_options=chunk_options,
+    )
     if (
         max_chunks is not None
         and estimated_chunks > max_chunks
@@ -3035,7 +3194,9 @@ def create_document_routes(
             # scheduled. pipeline_index_texts re-resolves from the same
             # addon_params inside the task.
             try:
-                _resolve_text_chunking(request.chunking, rag)
+                process_options, chunk_options = _resolve_text_chunking(
+                    request.chunking, rag
+                )
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
 
@@ -3044,6 +3205,8 @@ def create_document_routes(
                 [request.text],
                 confirm_large_ingestion=request.confirm_large_ingestion,
                 max_chunks_override=request.max_chunks_override,
+                process_options=process_options,
+                chunk_options=chunk_options,
             )
 
             # Generate track_id for text insertion
@@ -3167,12 +3330,24 @@ def create_document_routes(
             # background work is scheduled. pipeline_index_texts re-resolves
             # from the same addon_params inside the task.
             try:
-                _resolve_text_chunking(request.chunking, rag)
+                process_options, chunk_options = _resolve_text_chunking(
+                    request.chunking, rag
+                )
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
 
+            enforce_max_ingestion_chunks(
+                rag,
+                request.texts,
+                confirm_large_ingestion=request.confirm_large_ingestion,
+                max_chunks_override=request.max_chunks_override,
+                process_options=process_options,
+                chunk_options=chunk_options,
+            )
+
             # Generate track_id for texts insertion
             track_id = generate_track_id("insert")
+            register_ingestion_job(track_id)
 
             async def _indexing_task():
                 try:
