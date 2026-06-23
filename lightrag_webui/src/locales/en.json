@@ -183,6 +183,8 @@
       "startTime": "Start Time",
       "progress": "Progress",
       "unit": "Batch",
+      "chunkProgress": "Chunks extracted",
+      "currentDocId": "Current doc id",
       "pipelineMessages": "Pipeline Messages",
       "cancelButton": "Cancel",
       "cancelTooltip": "Cancel pipeline processing",

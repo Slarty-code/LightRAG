@@ -1390,6 +1390,7 @@ async def initialize_pipeline_status(workspace: str | None = None):
     async with get_internal_lock():
         # Check if already initialized by checking for required fields
         if "busy" in pipeline_namespace:
+            _ensure_pipeline_chunk_progress_keys(pipeline_namespace)
             return
 
         # Create a shared list object for history_messages
@@ -1431,6 +1432,10 @@ async def initialize_pipeline_status(workspace: str | None = None):
                 "request_pending": False,  # Flag for pending request for processing
                 "latest_message": "",  # Latest message from pipeline processing
                 "history_messages": history_messages,  # 使用共享列表对象
+                "chunks_total": 0,
+                "chunks_done": 0,
+                "current_doc_id": None,
+                "chunk_progress": {},
             }
         )
 
@@ -1438,6 +1443,83 @@ async def initialize_pipeline_status(workspace: str | None = None):
         direct_log(
             f"Process {os.getpid()} Pipeline namespace '{final_namespace}' initialized"
         )
+
+
+def _ensure_pipeline_chunk_progress_keys(pipeline_namespace: Dict[str, Any]) -> None:
+    """Backfill chunk progress fields for workspaces initialized before these keys existed."""
+    if "chunks_total" not in pipeline_namespace:
+        pipeline_namespace["chunks_total"] = 0
+    if "chunks_done" not in pipeline_namespace:
+        pipeline_namespace["chunks_done"] = 0
+    if "current_doc_id" not in pipeline_namespace:
+        pipeline_namespace["current_doc_id"] = None
+    if "chunk_progress" not in pipeline_namespace:
+        pipeline_namespace["chunk_progress"] = {}
+
+
+def sync_pipeline_chunk_aggregates(pipeline_status: dict[str, Any]) -> None:
+    """Recompute chunks_total and chunks_done from chunk_progress (per-document map)."""
+    prog = pipeline_status.get("chunk_progress")
+    if not prog:
+        pipeline_status["chunks_total"] = 0
+        pipeline_status["chunks_done"] = 0
+        return
+    total = 0
+    done = 0
+    for v in prog.values():
+        if isinstance(v, dict):
+            total += int(v.get("total", 0))
+            done += int(v.get("done", 0))
+    pipeline_status["chunks_total"] = total
+    pipeline_status["chunks_done"] = done
+
+
+def register_pipeline_chunk_progress(
+    pipeline_status: dict[str, Any], doc_id: str, chunks_total: int
+) -> None:
+    """Register per-document chunk totals before entity extraction (replaces prior entry for doc_id)."""
+    prog = dict(pipeline_status.get("chunk_progress") or {})
+    prog[doc_id] = {"total": int(chunks_total), "done": 0}
+    pipeline_status["chunk_progress"] = prog
+    sync_pipeline_chunk_aggregates(pipeline_status)
+    pipeline_status["current_doc_id"] = doc_id
+
+
+def increment_pipeline_chunk_progress(
+    pipeline_status: dict[str, Any], doc_id: str
+) -> None:
+    """Increment done count for a document after one chunk is extracted."""
+    prog = dict(pipeline_status.get("chunk_progress") or {})
+    if doc_id not in prog:
+        return
+    entry = prog[doc_id]
+    prog[doc_id] = {
+        "total": int(entry.get("total", 0)),
+        "done": int(entry.get("done", 0)) + 1,
+    }
+    pipeline_status["chunk_progress"] = prog
+    sync_pipeline_chunk_aggregates(pipeline_status)
+    pipeline_status["current_doc_id"] = doc_id
+
+
+def unregister_pipeline_chunk_progress(
+    pipeline_status: dict[str, Any], doc_id: str
+) -> None:
+    """Remove a document from chunk progress when processing finishes or fails."""
+    prog = dict(pipeline_status.get("chunk_progress") or {})
+    prog.pop(doc_id, None)
+    pipeline_status["chunk_progress"] = prog
+    sync_pipeline_chunk_aggregates(pipeline_status)
+    if not prog:
+        pipeline_status["current_doc_id"] = None
+
+
+def clear_pipeline_chunk_progress(pipeline_status: dict[str, Any]) -> None:
+    """Reset all chunk progress fields (e.g. when the pipeline stops)."""
+    pipeline_status["chunk_progress"] = {}
+    pipeline_status["chunks_total"] = 0
+    pipeline_status["chunks_done"] = 0
+    pipeline_status["current_doc_id"] = None
 
 
 async def get_update_flag(namespace: str, workspace: str | None = None):

@@ -221,6 +221,16 @@ export default function PipelineStatusDialog({
                 : '-'}</span>
               <span>{t('documentPanel.pipelineStatus.progress')}: {status ? `${status.cur_batch}/${status.batchs} ${t('documentPanel.pipelineStatus.unit')}` : '-'}</span>
             </div>
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>{t('documentPanel.pipelineStatus.chunkProgress')}: {status != null && (status.chunks_total ?? 0) > 0
+                ? `${status.chunks_done ?? 0}/${status.chunks_total ?? 0}`
+                : '-'}</span>
+              <span className="truncate max-w-[55%] text-right" title={status?.current_doc_id ?? ''}>
+                {status?.current_doc_id
+                  ? `${t('documentPanel.pipelineStatus.currentDocId')}: ${status.current_doc_id}`
+                  : ''}
+              </span>
+            </div>
           </div>
 
           {/* History Messages */}

@@ -713,6 +713,9 @@ def parse_args() -> argparse.Namespace:
     args.max_upload_size = get_env_value(
         "MAX_UPLOAD_SIZE", 104857600, int, special_none=True
     )
+    args.max_ingestion_chunks = get_env_value(
+        "MAX_INGESTION_CHUNKS", 1000, int, special_none=True
+    )
 
     # Embedding prefix configuration for context-aware embeddings. Empty prefixes
     # must be explicit via NO_PREFIX so missing config is distinguishable.

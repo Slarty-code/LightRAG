@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 
 from lightrag.exceptions import (
     PipelineCancelledException,
+    PipelinePausedException,
 )
 from lightrag.utils import (
     logger,
@@ -82,7 +83,10 @@ from lightrag.constants import (
     DEFAULT_ENTITY_NAME_MAX_LENGTH,
     DEFAULT_ENTITY_NAME_MAX_BYTES,
 )
-from lightrag.kg.shared_storage import get_storage_keyed_lock
+from lightrag.kg.shared_storage import (
+    get_storage_keyed_lock,
+    increment_pipeline_chunk_progress,
+)
 import time
 from dotenv import load_dotenv
 
@@ -3332,6 +3336,8 @@ async def extract_entities(
                 raise PipelineCancelledException(
                     "User cancelled during entity extraction"
                 )
+            if pipeline_status.get("pause_requested", False):
+                raise PipelinePausedException("User paused during entity extraction")
 
     use_llm_func: callable = global_config["role_llm_funcs"]["extract"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
@@ -3703,8 +3709,11 @@ async def extract_entities(
         relations_count = len(maybe_edges)
         log_message = f"Chunk {processed_chunks} of {total_chunks} extracted {entities_count} Ent + {relations_count} Rel {chunk_key}"
         logger.info(log_message)
-        if pipeline_status is not None:
+        if pipeline_status is not None and pipeline_status_lock is not None:
             async with pipeline_status_lock:
+                fid = chunk_dp.get("full_doc_id")
+                if fid:
+                    increment_pipeline_chunk_progress(pipeline_status, fid)
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
 
@@ -3723,6 +3732,10 @@ async def extract_entities(
                     if pipeline_status.get("cancellation_requested", False):
                         raise PipelineCancelledException(
                             "User cancelled during chunk processing"
+                        )
+                    if pipeline_status.get("pause_requested", False):
+                        raise PipelinePausedException(
+                            "User paused during chunk processing"
                         )
 
             try:
