@@ -13,12 +13,16 @@ FIXTURES_DIR = Path(__file__).resolve().parent
 ACT_MARKDOWN = "mini_ita_deductions.md"
 ACT_BLOCKS_JSONL = "mini_ita_deductions.blocks.jsonl"
 TD_MARKDOWN = "td_general_deductions.md"
+PG_MARKDOWN = "pg_general_deductions.md"
+PR_MARKDOWN = "pr_general_deductions.md"
 # Chunk-integrity / offline schema from the harness brief (``oracle`` key).
 ORACLE_JSON = "oracle.json"
 RULES_DATASET_JSON = "rules_dataset.json"
 # HTTP fitness runner defaults (``cases`` key) — same Act-grounded content.
 TAX_RETRIEVAL_ORACLE_JSON = "tax_retrieval_oracle.json"
 TAX_RULES_DATASET_JSON = "tax_rules_dataset.json"
+# Reserved for Part 2 scenario / WHAT-IF packs (not evaluated in v1).
+TAX_SCENARIO_ORACLE_JSON = "tax_scenario_oracle.json"
 
 
 def fixture_path(name: str) -> Path:
@@ -31,9 +35,12 @@ __all__ = [
     "ACT_MARKDOWN",
     "FIXTURES_DIR",
     "ORACLE_JSON",
+    "PG_MARKDOWN",
+    "PR_MARKDOWN",
     "RULES_DATASET_JSON",
     "TAX_RETRIEVAL_ORACLE_JSON",
     "TAX_RULES_DATASET_JSON",
+    "TAX_SCENARIO_ORACLE_JSON",
     "TD_MARKDOWN",
     "fixture_path",
 ]

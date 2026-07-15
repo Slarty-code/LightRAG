@@ -1,0 +1,5 @@
+{
+  "description": "NOT YET evaluated. Reserved for client-scenario + WHAT-IF packs. Intended case shape (v2): id, scenario_id, question, baseline_case_id (optional paired variant), what_if (null or variant descriptor), expected_sources {acts,tds,pgs,prs}, expected_issues, expected_benefits, forbidden_sources, variant_must_change (citation/issue/benefit sets that must differ from baseline).",
+  "defaults": {},
+  "cases": []
+}

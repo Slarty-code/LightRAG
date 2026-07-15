@@ -1,4 +1,5 @@
 {
+  "description": "Offline chunk-integrity / schema oracle (oracle key). Optional v2 fields reserved for scenario packs match tax_retrieval_oracle.json: expected_sources, expected_issues, expected_benefits, forbidden_sources, scenario_id, what_if, baseline_case_id — unused by v1 integrity checks.",
   "oracle": [
     {
       "question": "When can a taxpayer claim a general deduction under the synthetic Act?",
@@ -45,6 +46,18 @@
       "forbidden_chunk_contains": [
         "penalty for false"
       ],
+      "expected_sources": {
+        "acts": ["s 8-1", "mini_ita_deductions"],
+        "tds": ["TD 2024/1", "td_general_deductions"],
+        "pgs": ["PG 2024/1", "pg_general_deductions"],
+        "prs": ["PR 2024/1", "pr_general_deductions"]
+      },
+      "expected_issues": [],
+      "expected_benefits": [],
+      "forbidden_sources": ["penalty for false"],
+      "scenario_id": null,
+      "what_if": null,
+      "baseline_case_id": null,
       "mode": "mix"
     }
   ]

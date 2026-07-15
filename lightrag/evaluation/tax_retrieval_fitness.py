@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -33,6 +34,18 @@ DEFAULT_MODES = ("naive", "local", "hybrid", "mix")
 
 CONNECT_TIMEOUT_SECONDS = 10.0
 READ_TIMEOUT_SECONDS = 180.0
+
+INSTRUMENT_TYPES = ("act", "td", "pg", "pr")
+_SOURCE_KEY_TO_TYPE = {
+    "acts": "act",
+    "tds": "td",
+    "pgs": "pg",
+    "prs": "pr",
+    "act": "act",
+    "td": "td",
+    "pg": "pg",
+    "pr": "pr",
+}
 
 
 class ServerUnavailableError(RuntimeError):
@@ -149,6 +162,67 @@ def reciprocal_rank(
     return 1.0 / rank
 
 
+def classify_instrument(text_or_path: str) -> str:
+    """Heuristic instrument class: ``act`` | ``td`` | ``pg`` | ``pr`` | ``unknown``.
+
+    Uses filename patterns (``td_``, ``pg_``, ``pr_``, ``mini_ita``) and
+    content tokens (Taxation Determination / Practice Guide / Product Ruling /
+    ITAA / Assessment Act).
+    """
+    text = (text_or_path or "").strip()
+    if not text:
+        return "unknown"
+
+    folded = text.casefold()
+    name = Path(text).name.casefold()
+
+    if (
+        name.startswith("td_")
+        or name.startswith("td ")
+        or name.startswith("td-")
+        or "/td_" in folded
+        or "\\td_" in folded
+    ):
+        return "td"
+    if (
+        name.startswith("pg_")
+        or name.startswith("pg ")
+        or name.startswith("pg-")
+        or "/pg_" in folded
+        or "\\pg_" in folded
+    ):
+        return "pg"
+    if (
+        name.startswith("pr_")
+        or name.startswith("pr ")
+        or name.startswith("pr-")
+        or "/pr_" in folded
+        or "\\pr_" in folded
+    ):
+        return "pr"
+    if (
+        "mini_ita" in name
+        or name.startswith("itaa")
+        or "income_tax" in name
+        or name.startswith("act_")
+    ):
+        return "act"
+
+    if re.search(r"\btd\s*\d", folded) or "taxation determination" in folded:
+        return "td"
+    if re.search(r"\bpg\s*\d", folded) or "practice guide" in folded:
+        return "pg"
+    if re.search(r"\bpr\s*\d", folded) or "product ruling" in folded:
+        return "pr"
+    if (
+        "itaa" in folded
+        or "income tax assessment act" in folded
+        or "synthetic mini" in folded
+    ):
+        return "act"
+    return "unknown"
+
+
 def chunk_search_text(chunk: dict[str, Any]) -> str:
     """Build the searchable text for one /query/data chunk.
 
@@ -170,8 +244,11 @@ def chunk_search_text(chunk: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def extract_ranked_chunk_texts(query_data_payload: dict[str, Any]) -> list[str]:
-    """Extract ranked chunk texts from a /query/data JSON body.
+def extract_ranked_chunks(query_data_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract ranked chunk dicts from a /query/data JSON body.
+
+    Each entry preserves ``content``, ``content_headings``, ``file_path`` and
+    an inferred ``instrument`` (``act``|``td``|``pg``|``pr``|``unknown``).
 
     Expected shape (current API)::
 
@@ -201,17 +278,184 @@ def extract_ranked_chunk_texts(query_data_payload: dict[str, Any]) -> list[str]:
     if not isinstance(chunks, list):
         return []
 
-    ranked: list[str] = []
+    ranked: list[dict[str, Any]] = []
     for chunk in chunks:
         if isinstance(chunk, str):
-            if chunk.strip():
-                ranked.append(chunk)
+            if not chunk.strip():
+                continue
+            ranked.append(
+                {
+                    "content": chunk,
+                    "content_headings": None,
+                    "file_path": None,
+                    "instrument": classify_instrument(chunk),
+                }
+            )
             continue
-        if isinstance(chunk, dict):
-            text = chunk_search_text(chunk)
-            if text.strip():
-                ranked.append(text)
+        if not isinstance(chunk, dict):
+            continue
+        content = chunk.get("content") if isinstance(chunk.get("content"), str) else ""
+        headings = chunk.get("content_headings")
+        file_path = (
+            chunk.get("file_path")
+            if isinstance(chunk.get("file_path"), str)
+            else None
+        )
+        search = chunk_search_text(
+            {
+                "content": content,
+                "content_headings": headings,
+                "file_path": file_path,
+            }
+        )
+        if not search.strip():
+            continue
+        classify_from = file_path or search
+        ranked.append(
+            {
+                "content": content or None,
+                "content_headings": headings,
+                "file_path": file_path,
+                "instrument": classify_instrument(classify_from),
+            }
+        )
     return ranked
+
+
+def extract_ranked_chunk_texts(query_data_payload: dict[str, Any]) -> list[str]:
+    """Extract ranked chunk texts from a /query/data JSON body.
+
+    Thin wrapper over :func:`extract_ranked_chunks` for back-compat.
+    """
+    ranked: list[str] = []
+    for chunk in extract_ranked_chunks(query_data_payload):
+        content = chunk.get("content")
+        headings = chunk.get("content_headings")
+        file_path = chunk.get("file_path")
+        # Plain-string chunks preserve content alone; structured chunks use
+        # content + headings + file_path (same as historical chunk_search_text).
+        if (
+            isinstance(content, str)
+            and content.strip()
+            and headings is None
+            and not file_path
+        ):
+            ranked.append(content)
+            continue
+        text = chunk_search_text(chunk)
+        if text.strip():
+            ranked.append(text)
+    return ranked
+
+
+def extract_graph_context_present(query_data_payload: dict[str, Any]) -> bool:
+    """True when /query/data payload has a non-empty entities or relationships list."""
+    if not isinstance(query_data_payload, dict):
+        return False
+    data = query_data_payload.get("data")
+    entities: Any = None
+    relationships: Any = None
+    if isinstance(data, dict):
+        entities = data.get("entities")
+        relationships = data.get("relationships")
+    if entities is None:
+        entities = query_data_payload.get("entities")
+    if relationships is None:
+        relationships = query_data_payload.get("relationships")
+    has_entities = isinstance(entities, list) and len(entities) > 0
+    has_relationships = isinstance(relationships, list) and len(relationships) > 0
+    return has_entities or has_relationships
+
+
+def source_type_recall(
+    expected_sources: dict[str, Any] | None,
+    ranked_chunks: Sequence[dict[str, Any]],
+    top_k: int,
+    *,
+    case_sensitive: bool = False,
+) -> dict[str, float]:
+    """Fraction of expected needles hit per instrument type; plus ``overall`` mean.
+
+    Only types with a non-empty expected list are scored. A needle hits when it
+    appears in the searchable text of at least one top-K chunk whose
+    ``instrument`` matches that type. When no types are scorable, ``overall``
+    is ``1.0`` (v1 soft default).
+    """
+    if not expected_sources or not isinstance(expected_sources, dict):
+        return {"overall": 1.0}
+
+    window = list(ranked_chunks)[:top_k]
+    per_type: dict[str, float] = {}
+    for key, needles_raw in expected_sources.items():
+        instrument = _SOURCE_KEY_TO_TYPE.get(str(key).casefold())
+        if instrument is None:
+            continue
+        needles = [str(n) for n in (needles_raw or []) if str(n).strip()]
+        if not needles:
+            continue
+        type_texts = [
+            chunk_search_text(chunk)
+            for chunk in window
+            if chunk.get("instrument") == instrument
+        ]
+        if not type_texts:
+            per_type[instrument] = 0.0
+        else:
+            per_type[instrument] = hit_fraction_at_k(
+                needles,
+                type_texts,
+                top_k=len(type_texts),
+                case_sensitive=case_sensitive,
+            )
+
+    if not per_type:
+        return {"overall": 1.0}
+    overall = sum(per_type.values()) / len(per_type)
+    return {**per_type, "overall": overall}
+
+
+def citation_set(
+    ranked_chunks_or_texts: Sequence[Any],
+    top_k: int,
+) -> set[str]:
+    """Stable citation ids for top-K items (prefer ``file_path``, else first 80 chars)."""
+    result: set[str] = set()
+    for item in list(ranked_chunks_or_texts)[:top_k]:
+        if isinstance(item, dict):
+            file_path = item.get("file_path")
+            if isinstance(file_path, str) and file_path.strip():
+                result.add(file_path.strip())
+                continue
+            content = item.get("content")
+            if isinstance(content, str) and content.strip():
+                result.add(content.strip()[:80])
+                continue
+            text = chunk_search_text(item).strip()
+            if text:
+                result.add(text[:80])
+            continue
+        text = str(item).strip()
+        if text:
+            result.add(text[:80])
+    return result
+
+
+def jaccard(a: set[str], b: set[str]) -> float:
+    """Jaccard similarity of two citation/id sets."""
+    if not a and not b:
+        return 1.0
+    union = a | b
+    if not union:
+        return 1.0
+    return len(a & b) / len(union)
+
+
+def set_delta(a: set[str], b: set[str]) -> dict[str, list[str]]:
+    """Return ``added`` (in b not a) and ``removed`` (in a not b) as sorted lists."""
+    return {
+        "added": sorted(b - a),
+        "removed": sorted(a - b),
+    }
 
 
 def extract_answer_and_citation_blob(query_payload: dict[str, Any]) -> tuple[str, str]:
@@ -249,6 +493,10 @@ class RetrievalCaseScore:
     expected_sections: list[str] = field(default_factory=list)
     expected_chunk_contains: list[str] = field(default_factory=list)
     forbidden_chunk_contains: list[str] = field(default_factory=list)
+    # Optional v2 soft fields — recorded when expected_sources present; not gated in v1.
+    source_type_recall_by_type: dict[str, float] = field(default_factory=dict)
+    source_type_recall: float = 1.0
+    graph_context_present: bool = False
 
     def passes(
         self,
@@ -257,6 +505,7 @@ class RetrievalCaseScore:
         min_provision_hit: float,
         require_trap_suppress: bool,
         min_mrr: float,
+        min_source_type_recall: float | None = None,
     ) -> bool:
         if self.section_hit_at_k < min_section_hit:
             return False
@@ -265,6 +514,11 @@ class RetrievalCaseScore:
         if require_trap_suppress and not self.trap_suppress:
             return False
         if self.mrr < min_mrr:
+            return False
+        if (
+            min_source_type_recall is not None
+            and self.source_type_recall < min_source_type_recall
+        ):
             return False
         return True
 
@@ -278,15 +532,34 @@ class RulesCaseScore:
     forbidden_answer_ok: bool
     expected_citation_ok: bool
     forbidden_citation_ok: bool
+    # Soft v2 fields: True when expected_issues / expected_benefits empty (no-op on passed).
+    issues_ok: bool = True
+    benefits_ok: bool = True
 
     @property
     def passed(self) -> bool:
+        # issues_ok / benefits_ok only tighten the gate when their oracle lists are
+        # non-empty (empty lists soft-default to True in score_rules_case).
         return (
             self.expected_answer_ok
             and self.forbidden_answer_ok
             and self.expected_citation_ok
             and self.forbidden_citation_ok
+            and self.issues_ok
+            and self.benefits_ok
         )
+
+
+def _chunks_from_texts(ranked_texts: Sequence[str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "content": text,
+            "content_headings": None,
+            "file_path": None,
+            "instrument": classify_instrument(text),
+        }
+        for text in ranked_texts
+    ]
 
 
 def score_retrieval_case(
@@ -295,11 +568,27 @@ def score_retrieval_case(
     *,
     mode: str,
     top_k: int,
+    ranked_chunks: Sequence[dict[str, Any]] | None = None,
+    graph_context_present: bool = False,
 ) -> RetrievalCaseScore:
     expected_sections = [str(x) for x in case.get("expected_sections") or []]
     expected_contains = [str(x) for x in case.get("expected_chunk_contains") or []]
     forbidden = [str(x) for x in case.get("forbidden_chunk_contains") or []]
     mrr_needles = expected_contains or expected_sections
+
+    chunks: Sequence[dict[str, Any]]
+    if ranked_chunks is not None:
+        chunks = ranked_chunks
+    else:
+        chunks = _chunks_from_texts(ranked_texts)
+
+    expected_sources = case.get("expected_sources")
+    recall = source_type_recall(
+        expected_sources if isinstance(expected_sources, dict) else None,
+        chunks,
+        top_k,
+    )
+    by_type = {k: v for k, v in recall.items() if k != "overall"}
 
     return RetrievalCaseScore(
         case_id=str(case.get("id") or case.get("question") or "unknown"),
@@ -319,6 +608,9 @@ def score_retrieval_case(
         expected_sections=expected_sections,
         expected_chunk_contains=expected_contains,
         forbidden_chunk_contains=forbidden,
+        source_type_recall_by_type=by_type,
+        source_type_recall=float(recall.get("overall", 1.0)),
+        graph_context_present=graph_context_present,
     )
 
 
@@ -331,6 +623,9 @@ def score_rules_case(
     forbidden_answer = [str(x) for x in case.get("forbidden_answer_contains") or []]
     expected_cite = [str(x) for x in case.get("expected_citation_contains") or []]
     forbidden_cite = [str(x) for x in case.get("forbidden_citation_contains") or []]
+    expected_issues = [str(x) for x in case.get("expected_issues") or []]
+    expected_benefits = [str(x) for x in case.get("expected_benefits") or []]
+    answer_and_cites = f"{answer}\n{citation_blob}"
 
     def _all_present(needles: Sequence[str], text: str) -> bool:
         if not needles:
@@ -348,6 +643,8 @@ def score_rules_case(
         forbidden_answer_ok=_none_present(forbidden_answer, answer),
         expected_citation_ok=_all_present(expected_cite, citation_blob),
         forbidden_citation_ok=_none_present(forbidden_cite, citation_blob),
+        issues_ok=_all_present(expected_issues, answer_and_cites),
+        benefits_ok=_all_present(expected_benefits, answer_and_cites),
     )
 
 
@@ -359,6 +656,8 @@ def summarize_retrieval(scores: Sequence[RetrievalCaseScore]) -> dict[str, Any]:
             "average_provision_hit_at_k": 0.0,
             "trap_suppress_rate": 0.0,
             "mean_reciprocal_rank": 0.0,
+            "average_source_type_recall": 0.0,
+            "graph_context_rate": 0.0,
         }
     n = len(scores)
     return {
@@ -367,6 +666,8 @@ def summarize_retrieval(scores: Sequence[RetrievalCaseScore]) -> dict[str, Any]:
         "average_provision_hit_at_k": sum(s.provision_hit_at_k for s in scores) / n,
         "trap_suppress_rate": sum(1 for s in scores if s.trap_suppress) / n,
         "mean_reciprocal_rank": sum(s.mrr for s in scores) / n,
+        "average_source_type_recall": sum(s.source_type_recall for s in scores) / n,
+        "graph_context_rate": sum(1 for s in scores if s.graph_context_present) / n,
         "by_mode": _by_mode_summary(scores),
     }
 
@@ -384,6 +685,8 @@ def _by_mode_summary(scores: Sequence[RetrievalCaseScore]) -> dict[str, Any]:
             "average_provision_hit_at_k": sum(s.provision_hit_at_k for s in group) / n,
             "trap_suppress_rate": sum(1 for s in group if s.trap_suppress) / n,
             "mean_reciprocal_rank": sum(s.mrr for s in group) / n,
+            "average_source_type_recall": sum(s.source_type_recall for s in group) / n,
+            "graph_context_rate": sum(1 for s in group if s.graph_context_present) / n,
         }
     return out
 
@@ -534,11 +837,22 @@ def run_retrieval_fitness(
                 chunk_top_k=top_k,
             )
             if payload.get("status") == "failure":
+                ranked_chunks: list[dict[str, Any]] = []
                 ranked: list[str] = []
+                graph_present = False
             else:
+                ranked_chunks = extract_ranked_chunks(payload)
                 ranked = extract_ranked_chunk_texts(payload)
+                graph_present = extract_graph_context_present(payload)
             scores.append(
-                score_retrieval_case(case, ranked, mode=str(mode), top_k=top_k)
+                score_retrieval_case(
+                    case,
+                    ranked,
+                    mode=str(mode),
+                    top_k=top_k,
+                    ranked_chunks=ranked_chunks,
+                    graph_context_present=graph_present,
+                )
             )
     return scores
 
@@ -573,6 +887,8 @@ def gates_passed(
     min_mrr: float,
     min_rules_pass_rate: float,
     check_rules: bool,
+    gate_source_type_recall: bool = False,
+    min_source_type_recall: float = 0.5,
 ) -> tuple[bool, list[str]]:
     failures: list[str] = []
     if retrieval_summary.get("queries", 0) > 0:
@@ -598,6 +914,12 @@ def gates_passed(
             failures.append(
                 f"mrr {retrieval_summary['mean_reciprocal_rank']:.3f} < {min_mrr}"
             )
+        if gate_source_type_recall:
+            avg_str = float(retrieval_summary.get("average_source_type_recall") or 0.0)
+            if avg_str < min_source_type_recall:
+                failures.append(
+                    f"source_type_recall {avg_str:.3f} < {min_source_type_recall}"
+                )
     if check_rules and rules_summary is not None and rules_summary.get("queries", 0) > 0:
         if rules_summary["pass_rate"] < min_rules_pass_rate:
             failures.append(
@@ -719,6 +1041,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         default=_env_float("TAX_EVAL_MIN_RULES_PASS_RATE", 1.0),
     )
+    parser.add_argument(
+        "--gate-source-type-recall",
+        action="store_true",
+        help=(
+            "Optional v2 gate: fail when average source_type_recall is below "
+            "--min-source-type-recall (default: off; v1 ignores this metric)"
+        ),
+    )
+    parser.add_argument(
+        "--min-source-type-recall",
+        type=float,
+        default=_env_float("TAX_EVAL_MIN_SOURCE_TYPE_RECALL", 0.5),
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -775,6 +1110,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         min_mrr=args.min_mrr,
         min_rules_pass_rate=args.min_rules_pass_rate,
         check_rules=not args.retrieval_only,
+        gate_source_type_recall=bool(args.gate_source_type_recall),
+        min_source_type_recall=args.min_source_type_recall,
     )
     report = build_report(
         retrieval_scores,

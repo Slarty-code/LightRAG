@@ -1,5 +1,5 @@
 {
-  "description": "Tax retrieval fitness oracle. Expand cases against ingested legislation; keep filenames stable for shared harness wiring.",
+  "description": "Tax retrieval fitness oracle. Expand cases against ingested legislation; keep filenames stable for shared harness wiring. Optional v2 fields are reserved for scenario/WHAT-IF multi-instrument packs and are ignored or soft-scored by v1: expected_sources {acts,tds,pgs,prs}, expected_issues, expected_benefits, forbidden_sources, scenario_id, what_if, baseline_case_id.",
   "defaults": {
     "top_k": 10,
     "modes": ["naive", "local", "hybrid", "mix"]
@@ -66,6 +66,18 @@
       "forbidden_chunk_contains": [
         "penalty for false"
       ],
+      "expected_sources": {
+        "acts": ["s 8-1", "mini_ita_deductions"],
+        "tds": ["TD 2024/1", "td_general_deductions"],
+        "pgs": ["PG 2024/1", "pg_general_deductions"],
+        "prs": ["PR 2024/1", "pr_general_deductions"]
+      },
+      "expected_issues": [],
+      "expected_benefits": [],
+      "forbidden_sources": ["penalty for false"],
+      "scenario_id": null,
+      "what_if": null,
+      "baseline_case_id": null,
       "modes": ["mix"],
       "mode": "mix",
       "top_k": 10

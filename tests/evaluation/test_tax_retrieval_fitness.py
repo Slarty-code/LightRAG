@@ -9,19 +9,32 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from lightrag.evaluation.tax_fixtures import (
+    PG_MARKDOWN,
+    PR_MARKDOWN,
+    TAX_SCENARIO_ORACLE_JSON,
+    fixture_path,
+)
 from lightrag.evaluation.tax_retrieval_fitness import (
     DEFAULT_ORACLE,
     DEFAULT_RULES,
     ServerUnavailableError,
     TaxFitnessClient,
+    citation_set,
+    classify_instrument,
+    extract_graph_context_present,
     extract_ranked_chunk_texts,
+    extract_ranked_chunks,
     hit_fraction_at_k,
+    jaccard,
     live_eval_enabled,
     load_oracle,
     load_rules_dataset,
     reciprocal_rank,
     score_retrieval_case,
     score_rules_case,
+    set_delta,
+    source_type_recall,
     summarize_retrieval,
     trap_suppressed,
 )
@@ -33,6 +46,12 @@ FIXTURES = Path("lightrag/evaluation/tax_fixtures")
 def test_fixture_stubs_exist_and_load():
     assert DEFAULT_ORACLE.is_file()
     assert DEFAULT_RULES.is_file()
+    assert fixture_path(PG_MARKDOWN).is_file()
+    assert fixture_path(PR_MARKDOWN).is_file()
+    scenario = json.loads(fixture_path(TAX_SCENARIO_ORACLE_JSON).read_text())
+    assert scenario["cases"] == []
+    assert "NOT YET" in scenario["description"]
+
     oracle = load_oracle(DEFAULT_ORACLE)
     rules = load_rules_dataset(DEFAULT_RULES)
     assert oracle["cases"]
@@ -41,6 +60,14 @@ def test_fixture_stubs_exist_and_load():
     assert "expected_sections" in case
     assert "expected_chunk_contains" in case
     assert "forbidden_chunk_contains" in case
+
+    td_case = next(c for c in oracle["cases"] if c["id"] == "td_apportionment_s8_1")
+    assert "expected_sources" in td_case
+    assert td_case["expected_sources"]["tds"]
+    assert td_case["expected_issues"] == []
+    assert td_case["expected_benefits"] == []
+    assert "forbidden_sources" in td_case
+    assert "optional v2" in oracle["description"].casefold()
 
 
 def test_extract_ranked_chunk_texts_prefers_data_chunks():
@@ -73,6 +100,202 @@ def test_extract_ranked_chunk_texts_prefers_data_chunks():
 def test_extract_ranked_chunk_texts_legacy_top_level_chunks():
     payload = {"chunks": [{"content": "legacy chunk"}, "plain string"]}
     assert extract_ranked_chunk_texts(payload) == ["legacy chunk", "plain string"]
+
+
+def test_classify_instrument_filename_and_content():
+    assert classify_instrument("td_general_deductions.md") == "td"
+    assert classify_instrument("pg_general_deductions.md") == "pg"
+    assert classify_instrument("pr_general_deductions.md") == "pr"
+    assert classify_instrument("mini_ita_deductions.md") == "act"
+    assert classify_instrument("TD 2024/1 (Synthetic) apportionment") == "td"
+    assert classify_instrument("Practice Guide PG 2024/1 summary") == "pg"
+    assert classify_instrument("Product Ruling PR 2024/1 arrangement") == "pr"
+    assert classify_instrument("Income Tax Assessment Act 1997 s 8-1") == "act"
+    assert classify_instrument("random memo without markers") == "unknown"
+
+
+def test_extract_ranked_chunks_infers_instrument():
+    payload = {
+        "data": {
+            "chunks": [
+                {
+                    "content": "Apportionment under to the extent.",
+                    "content_headings": "TD 2024/1 (Synthetic)",
+                    "file_path": "td_general_deductions.md",
+                },
+                {
+                    "content": "General deduction positive limbs.",
+                    "file_path": "mini_ita_deductions.md",
+                },
+                "plain practice guide pg 1 filler",
+            ],
+            "entities": [{"name": "s 8-1"}],
+            "relationships": [],
+        }
+    }
+    chunks = extract_ranked_chunks(payload)
+    assert len(chunks) == 3
+    assert chunks[0]["instrument"] == "td"
+    assert chunks[0]["file_path"] == "td_general_deductions.md"
+    assert chunks[1]["instrument"] == "act"
+    assert chunks[2]["instrument"] == "pg"
+    assert extract_ranked_chunk_texts(payload)[0].startswith("Apportionment")
+    assert extract_graph_context_present(payload) is True
+    assert extract_graph_context_present({"data": {"entities": [], "relationships": []}}) is False
+
+
+def test_source_type_recall_and_citation_helpers():
+    chunks = [
+        {
+            "content": "s 8-1 general deduction",
+            "content_headings": None,
+            "file_path": "mini_ita_deductions.md",
+            "instrument": "act",
+        },
+        {
+            "content": "TD 2024/1 apportionment",
+            "content_headings": None,
+            "file_path": "td_general_deductions.md",
+            "instrument": "td",
+        },
+        {
+            "content": "unrelated",
+            "content_headings": None,
+            "file_path": "other.md",
+            "instrument": "unknown",
+        },
+    ]
+    recall = source_type_recall(
+        {
+            "acts": ["s 8-1", "mini_ita_deductions"],
+            "tds": ["TD 2024/1", "missing_td_marker"],
+            "pgs": [],
+            "prs": [],
+        },
+        chunks,
+        top_k=3,
+    )
+    assert recall["act"] == 1.0
+    assert recall["td"] == 0.5
+    assert "pg" not in recall
+    assert recall["overall"] == pytest.approx(0.75)
+
+    empty = source_type_recall(None, chunks, top_k=3)
+    assert empty == {"overall": 1.0}
+
+    cites = citation_set(chunks, top_k=2)
+    assert cites == {"mini_ita_deductions.md", "td_general_deductions.md"}
+    assert jaccard(cites, cites) == 1.0
+    assert jaccard(set(), set()) == 1.0
+    delta = set_delta({"a", "b"}, {"b", "c"})
+    assert delta["added"] == ["c"]
+    assert delta["removed"] == ["a"]
+
+
+def test_score_retrieval_soft_source_type_recall():
+    case = {
+        "id": "multi",
+        "question": "crosswalk?",
+        "expected_sections": ["s 8-1"],
+        "expected_chunk_contains": ["apportionment"],
+        "forbidden_chunk_contains": [],
+        "expected_sources": {
+            "acts": ["s 8-1"],
+            "tds": ["TD 2024/1"],
+            "pgs": ["PG 2024/1"],
+            "prs": [],
+        },
+    }
+    ranked_chunks = [
+        {
+            "content": "s 8-1 and apportionment guidance",
+            "content_headings": "TD 2024/1 (Synthetic)",
+            "file_path": "td_general_deductions.md",
+            "instrument": "td",
+        },
+        {
+            "content": "s 8-1 positive limbs",
+            "content_headings": None,
+            "file_path": "mini_ita_deductions.md",
+            "instrument": "act",
+        },
+    ]
+    ranked = extract_ranked_chunk_texts({"chunks": ranked_chunks})
+    score = score_retrieval_case(
+        case,
+        ranked,
+        mode="mix",
+        top_k=2,
+        ranked_chunks=ranked_chunks,
+        graph_context_present=True,
+    )
+    assert score.source_type_recall_by_type["act"] == 1.0
+    assert score.source_type_recall_by_type["td"] == 1.0
+    assert score.source_type_recall_by_type["pg"] == 0.0
+    assert score.source_type_recall == pytest.approx(2.0 / 3.0)
+    assert score.graph_context_present is True
+    # v1 passes() ignores source_type_recall unless min is provided
+    assert score.passes(
+        min_section_hit=0.5,
+        min_provision_hit=0.5,
+        require_trap_suppress=True,
+        min_mrr=0.3,
+    )
+    assert not score.passes(
+        min_section_hit=0.5,
+        min_provision_hit=0.5,
+        require_trap_suppress=True,
+        min_mrr=0.3,
+        min_source_type_recall=0.9,
+    )
+
+
+def test_score_rules_soft_issues_and_benefits():
+    base = {
+        "id": "r_soft",
+        "question": "issues?",
+        "expected_answer_contains": ["deduction"],
+        "forbidden_answer_contains": [],
+        "expected_citation_contains": ["s 8-1"],
+        "forbidden_citation_contains": [],
+    }
+    # Empty / absent lists: soft fields default True and do not fail.
+    empty_lists = {
+        **base,
+        "expected_issues": [],
+        "expected_benefits": [],
+    }
+    ok = score_rules_case(
+        empty_lists,
+        "A deduction is available.",
+        "s 8-1",
+    )
+    assert ok.issues_ok is True
+    assert ok.benefits_ok is True
+    assert ok.passed is True
+
+    with_lists = {
+        **base,
+        "expected_issues": ["apportionment issue"],
+        "expected_benefits": ["income benefit"],
+    }
+    miss = score_rules_case(
+        with_lists,
+        "A deduction is available.",
+        "s 8-1",
+    )
+    assert miss.issues_ok is False
+    assert miss.benefits_ok is False
+    assert miss.passed is False
+
+    hit = score_rules_case(
+        with_lists,
+        "A deduction is available; apportionment issue noted.",
+        "s 8-1\nincome benefit applies",
+    )
+    assert hit.issues_ok is True
+    assert hit.benefits_ok is True
+    assert hit.passed is True
 
 
 def test_hit_fraction_and_mrr_helpers():
