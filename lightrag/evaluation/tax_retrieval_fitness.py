@@ -702,14 +702,47 @@ def summarize_rules(scores: Sequence[RulesCaseScore]) -> dict[str, Any]:
     }
 
 
+def case_enabled(case: dict[str, Any]) -> bool:
+    """Return False when a case explicitly sets ``enabled`` to a falsey flag.
+
+    Omit ``enabled`` (or set it true) to keep v1 fixture cases active. Templates
+    and WIP live oracles use ``"enabled": false`` so loaders can ship shells
+    without scoring them.
+    """
+    if "enabled" not in case:
+        return True
+    raw = case["enabled"]
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def enabled_cases(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return oracle/rules cases that are not disabled via ``enabled: false``."""
+    cases = payload.get("cases")
+    if not isinstance(cases, list):
+        return []
+    return [
+        entry
+        for entry in cases
+        if isinstance(entry, dict) and case_enabled(entry)
+    ]
+
+
 def load_oracle(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     cases = payload.get("cases")
     if not isinstance(cases, list) or not cases:
         raise ValueError(f"{path} must contain a non-empty cases list")
     for entry in cases:
+        if not isinstance(entry, dict):
+            raise ValueError("Each oracle case must be an object")
+        if not case_enabled(entry):
+            continue
         if not str(entry.get("question", "")).strip():
-            raise ValueError("Each oracle case needs a question")
+            raise ValueError("Each enabled oracle case needs a question")
     return payload
 
 
@@ -719,8 +752,12 @@ def load_rules_dataset(path: Path) -> dict[str, Any]:
     if not isinstance(cases, list) or not cases:
         raise ValueError(f"{path} must contain a non-empty cases list")
     for entry in cases:
+        if not isinstance(entry, dict):
+            raise ValueError("Each rules case must be an object")
+        if not case_enabled(entry):
+            continue
         if not str(entry.get("question", "")).strip():
-            raise ValueError("Each rules case needs a question")
+            raise ValueError("Each enabled rules case needs a question")
     return payload
 
 
@@ -825,8 +862,14 @@ def run_retrieval_fitness(
     default_modes = modes or defaults.get("modes") or list(DEFAULT_MODES)
     default_top_k = int(defaults.get("top_k") or 10)
     scores: list[RetrievalCaseScore] = []
+    cases = enabled_cases(oracle)
+    if not cases:
+        raise ValueError(
+            "Oracle has no enabled cases. Omit enabled or set enabled=true "
+            "(templates ship with enabled=false)."
+        )
 
-    for case in oracle["cases"]:
+    for case in cases:
         case_modes = case.get("modes") or default_modes
         top_k = int(case.get("top_k") or default_top_k)
         for mode in case_modes:
@@ -869,7 +912,13 @@ def run_rules_fitness(
     defaults = rules_dataset.get("defaults") or {}
     default_mode = str(defaults.get("mode") or "mix")
     scores: list[RulesCaseScore] = []
-    for case in rules_dataset["cases"]:
+    cases = enabled_cases(rules_dataset)
+    if not cases:
+        raise ValueError(
+            "Rules dataset has no enabled cases. Omit enabled or set enabled=true "
+            "(templates ship with enabled=false)."
+        )
+    for case in cases:
         mode = str(case.get("mode") or default_mode)
         payload = client.query_answer(str(case["question"]), mode=mode)
         answer, citation_blob = extract_answer_and_citation_blob(payload)

@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from lightrag.evaluation.tax_fixtures import (
+    LIVE_ORACLE_TEMPLATE_JSON,
     PG_MARKDOWN,
     PR_MARKDOWN,
     TAX_SCENARIO_ORACLE_JSON,
@@ -20,8 +21,10 @@ from lightrag.evaluation.tax_retrieval_fitness import (
     DEFAULT_RULES,
     ServerUnavailableError,
     TaxFitnessClient,
+    case_enabled,
     citation_set,
     classify_instrument,
+    enabled_cases,
     extract_graph_context_present,
     extract_ranked_chunk_texts,
     extract_ranked_chunks,
@@ -31,6 +34,7 @@ from lightrag.evaluation.tax_retrieval_fitness import (
     load_oracle,
     load_rules_dataset,
     reciprocal_rank,
+    run_retrieval_fitness,
     score_retrieval_case,
     score_rules_case,
     set_delta,
@@ -68,6 +72,88 @@ def test_fixture_stubs_exist_and_load():
     assert td_case["expected_benefits"] == []
     assert "forbidden_sources" in td_case
     assert "optional v2" in oracle["description"].casefold()
+
+
+def test_live_oracle_template_loads_all_disabled():
+    template_path = fixture_path(LIVE_ORACLE_TEMPLATE_JSON)
+    assert template_path.is_file()
+    payload = load_oracle(template_path)
+    assert "TEMPLATE" in payload["description"]
+    assert payload["cases"]
+    assert all(case.get("enabled") is False for case in payload["cases"])
+    assert enabled_cases(payload) == []
+    ids = {c["id"] for c in payload["cases"]}
+    assert "live_keyword_trap_deduction" in ids
+    assert "live_act_td_crosswalk" in ids
+    assert "live_multi_source_pack" in ids
+    multi = next(c for c in payload["cases"] if c["id"] == "live_multi_source_pack")
+    assert multi["expected_sources"]["pgs"] == []
+    assert multi["expected_sources"]["prs"] == []
+
+    client = TaxFitnessClient(api_url="http://localhost:9621")
+    with pytest.raises(ValueError, match="no enabled cases"):
+        run_retrieval_fitness(client, payload)
+
+
+def test_case_enabled_false_skipped_by_runner():
+    assert case_enabled({"question": "q"}) is True
+    assert case_enabled({"enabled": True, "question": "q"}) is True
+    assert case_enabled({"enabled": False, "question": "q"}) is False
+    assert case_enabled({"enabled": "false", "question": "q"}) is False
+
+    oracle = {
+        "defaults": {"modes": ["mix"], "top_k": 2},
+        "cases": [
+            {
+                "id": "disabled",
+                "enabled": False,
+                "question": "should skip",
+                "expected_sections": ["Section 1"],
+                "expected_chunk_contains": ["basic rate"],
+                "forbidden_chunk_contains": [],
+                "modes": ["mix"],
+            },
+            {
+                "id": "active",
+                "question": "What is the basic rate?",
+                "expected_sections": ["Section 1"],
+                "expected_chunk_contains": ["basic rate"],
+                "forbidden_chunk_contains": [],
+                "modes": ["mix"],
+            },
+        ],
+    }
+    assert [c["id"] for c in enabled_cases(oracle)] == ["active"]
+
+    response_json = {
+        "status": "success",
+        "data": {
+            "chunks": [
+                {
+                    "content": "Section 1 sets the basic rate of income tax.",
+                    "content_headings": "Section 1",
+                    "file_path": "tax.pdf",
+                }
+            ],
+            "entities": [],
+            "relationships": [],
+        },
+    }
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = response_json
+
+    client = TaxFitnessClient(api_url="http://localhost:9621")
+    with patch("httpx.Client") as client_cls:
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.post.return_value = mock_response
+        client_cls.return_value = mock_client
+        scores = run_retrieval_fitness(client, oracle)
+
+    assert len(scores) == 1
+    assert scores[0].case_id == "active"
+    assert mock_client.post.call_count == 1
 
 
 def test_extract_ranked_chunk_texts_prefers_data_chunks():
@@ -466,7 +552,9 @@ def test_live_tax_fitness_preflight_or_skip():
         pytest.skip(str(exc))
 
     oracle = load_oracle(DEFAULT_ORACLE)
-    case = oracle["cases"][0]
+    cases = enabled_cases(oracle)
+    assert cases, "default oracle must have at least one enabled case"
+    case = cases[0]
     mode = (case.get("modes") or ["mix"])[0]
     payload = client.query_data(str(case["question"]), mode=str(mode), top_k=5)
     assert isinstance(payload, dict)

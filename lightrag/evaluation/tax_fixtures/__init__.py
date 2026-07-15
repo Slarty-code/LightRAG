@@ -23,6 +23,8 @@ TAX_RETRIEVAL_ORACLE_JSON = "tax_retrieval_oracle.json"
 TAX_RULES_DATASET_JSON = "tax_rules_dataset.json"
 # Reserved for Part 2 scenario / WHAT-IF packs (not evaluated in v1).
 TAX_SCENARIO_ORACLE_JSON = "tax_scenario_oracle.json"
+# Copy-paste template for curating live ITAA/ATO oracles (all cases enabled=false).
+LIVE_ORACLE_TEMPLATE_JSON = "live_oracle_template.json"
 
 
 def fixture_path(name: str) -> Path:
@@ -34,6 +36,7 @@ __all__ = [
     "ACT_BLOCKS_JSONL",
     "ACT_MARKDOWN",
     "FIXTURES_DIR",
+    "LIVE_ORACLE_TEMPLATE_JSON",
     "ORACLE_JSON",
     "PG_MARKDOWN",
     "PR_MARKDOWN",
