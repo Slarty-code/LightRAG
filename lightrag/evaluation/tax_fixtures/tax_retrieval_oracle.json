@@ -1,0 +1,74 @@
+{
+  "description": "Tax retrieval fitness oracle. Expand cases against ingested legislation; keep filenames stable for shared harness wiring.",
+  "defaults": {
+    "top_k": 10,
+    "modes": ["naive", "local", "hybrid", "mix"]
+  },
+  "cases": [
+    {
+      "id": "stub_basic_rate",
+      "question": "What is the basic rate of income tax for individuals?",
+      "expected_sections": ["Section 1", "s. 1"],
+      "expected_chunk_contains": ["basic rate", "income tax"],
+      "forbidden_chunk_contains": ["capital gains", "stamp duty"],
+      "modes": ["naive", "local", "hybrid", "mix"],
+      "top_k": 10
+    },
+    {
+      "id": "general_deduction_s8_1",
+      "question": "When can a taxpayer claim a general deduction under the synthetic Act?",
+      "expected_sections": [
+        "Part 2 — Deductions",
+        "Division 8 — General deductions",
+        "s 8-1"
+      ],
+      "expected_chunk_contains": [
+        "general deduction",
+        "to the extent"
+      ],
+      "forbidden_chunk_contains": [
+        "penalty for false"
+      ],
+      "modes": ["naive", "local", "hybrid", "mix"],
+      "mode": "mix",
+      "top_k": 10
+    },
+    {
+      "id": "general_deduction_s8_5",
+      "question": "What does section 8-5 say about general deductions relative to section 8-1?",
+      "expected_sections": [
+        "Division 8 — General deductions",
+        "s 8-5",
+        "s 8-1"
+      ],
+      "expected_chunk_contains": [
+        "general deduction",
+        "double deduction"
+      ],
+      "forbidden_chunk_contains": [
+        "penalty for false"
+      ],
+      "modes": ["hybrid", "mix"],
+      "mode": "hybrid",
+      "top_k": 10
+    },
+    {
+      "id": "td_apportionment_s8_1",
+      "question": "Does the ATO-style TD confirm that to the extent in s 8-1 requires apportionment?",
+      "expected_sections": [
+        "s 8-1",
+        "TD 2024/1 (Synthetic)"
+      ],
+      "expected_chunk_contains": [
+        "to the extent",
+        "apportionment"
+      ],
+      "forbidden_chunk_contains": [
+        "penalty for false"
+      ],
+      "modes": ["mix"],
+      "mode": "mix",
+      "top_k": 10
+    }
+  ]
+}

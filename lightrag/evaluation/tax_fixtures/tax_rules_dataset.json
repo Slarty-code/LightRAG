@@ -1,0 +1,47 @@
+{
+  "description": "Light guidance/rules answer checks via POST /query. Deterministic string judges for v1; RAGAS can plug in later.",
+  "defaults": {
+    "mode": "mix"
+  },
+  "cases": [
+    {
+      "id": "stub_cite_basic_rate",
+      "question": "Cite the provision that sets the basic rate of income tax for individuals.",
+      "mode": "mix",
+      "expected_answer_contains": ["basic rate"],
+      "forbidden_answer_contains": ["stamp duty"],
+      "expected_citation_contains": ["Section 1", "s. 1"],
+      "forbidden_citation_contains": ["capital gains"]
+    },
+    {
+      "id": "rule_s8_1_general_deduction",
+      "question": "When is a general deduction allowed under s 8-1?",
+      "mode": "mix",
+      "expected_cite": "s 8-1",
+      "rule_skeleton": [
+        "Positive limbs: incurred in gaining/producing assessable income, or necessarily incurred in carrying on a business for that purpose",
+        "Negative limbs: capital / private or domestic / exempt or NANE income",
+        "Apply apportionment via 'to the extent'"
+      ],
+      "expected_answer_contains": ["to the extent", "assessable income"],
+      "forbidden_answer_contains": ["penalty for false"],
+      "expected_citation_contains": ["s 8-1", "Division 8"],
+      "forbidden_citation_contains": ["Part 4"]
+    },
+    {
+      "id": "rule_s8_5_interaction",
+      "question": "How do specific deductions interact with the general deduction?",
+      "mode": "mix",
+      "expected_cite": "s 8-5",
+      "rule_skeleton": [
+        "s 8-1 is the leading general deduction",
+        "Specific deductions may apply even when s 8-1 would not",
+        "No double deduction for the same loss or outgoing"
+      ],
+      "expected_answer_contains": ["general deduction", "double deduction"],
+      "forbidden_answer_contains": ["penalty for false"],
+      "expected_citation_contains": ["s 8-5", "s 8-1"],
+      "forbidden_citation_contains": ["Part 4"]
+    }
+  ]
+}

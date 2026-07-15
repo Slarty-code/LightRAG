@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "question": "When is a general deduction allowed under s 8-1?",
+      "expected_cite": "s 8-1",
+      "rule_skeleton": [
+        "Positive limbs: incurred in gaining/producing assessable income, or necessarily incurred in carrying on a business for that purpose",
+        "Negative limbs: capital / private or domestic / exempt or NANE income",
+        "Apply apportionment via 'to the extent'"
+      ]
+    },
+    {
+      "question": "How do specific deductions interact with the general deduction?",
+      "expected_cite": "s 8-5",
+      "rule_skeleton": [
+        "s 8-1 is the leading general deduction",
+        "Specific deductions may apply even when s 8-1 would not",
+        "No double deduction for the same loss or outgoing"
+      ]
+    }
+  ]
+}
