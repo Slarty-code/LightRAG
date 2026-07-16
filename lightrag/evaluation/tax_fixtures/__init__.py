@@ -21,8 +21,10 @@ RULES_DATASET_JSON = "rules_dataset.json"
 # HTTP fitness runner defaults (``cases`` key) — same Act-grounded content.
 TAX_RETRIEVAL_ORACLE_JSON = "tax_retrieval_oracle.json"
 TAX_RULES_DATASET_JSON = "tax_rules_dataset.json"
-# Reserved for Part 2 scenario / WHAT-IF packs (not evaluated in v1).
+# Hand-curated optional scenario oracle; live drafts go to live_runs via tax_scenario_eval.
 TAX_SCENARIO_ORACLE_JSON = "tax_scenario_oracle.json"
+# Client-scenario + WHAT-IF seeds for tax_scenario_eval (Part 2 first slice).
+TAX_SCENARIO_SEEDS_JSON = "tax_scenario_seeds.json"
 # Copy-paste template for curating live ITAA/ATO oracles (all cases enabled=false).
 LIVE_ORACLE_TEMPLATE_JSON = "live_oracle_template.json"
 # Seed questions for tax_live_loop recon → auto-draft → sweep.
@@ -47,6 +49,7 @@ __all__ = [
     "TAX_RETRIEVAL_ORACLE_JSON",
     "TAX_RULES_DATASET_JSON",
     "TAX_SCENARIO_ORACLE_JSON",
+    "TAX_SCENARIO_SEEDS_JSON",
     "TD_MARKDOWN",
     "fixture_path",
 ]

@@ -151,6 +151,65 @@ uv run python -m lightrag.evaluation.tax_model_ab `
 Each report includes `model_ab.query_llm_model`, `label`, and a filename like
 `fitness_zdr_vendor__model_….json`.
 
+### Scenario + WHAT-IF eval (Part 2 first slice)
+
+Larger live query tests for **client scenarios** and **WHAT-IF** variants that
+target Act/TD/PG/PR reference packs with issues/benefits. This is the eval
+harness only — not agent orchestration or LLM-as-judge.
+
+Seeds: `tax_fixtures/tax_scenario_seeds.json` (employee home office + sole-trader
+WHAT-IF, business expense, apportionment, keyword trap, Act↔TD/PG crosswalk,
+penalty negative, etc.).
+
+```powershell
+# Sonnet (or other ZDR) QUERY model — answer-first scenario pack
+$env:TAX_EVAL_LIVE = "true"
+uv run python -m lightrag.evaluation.tax_scenario_eval `
+  --api-url http://localhost:9621 `
+  --modes hybrid `
+  --top-k 50 `
+  --chunk-top-k 50 `
+  --label sonnet `
+  --output-dir .\live_runs\scenario_sonnet
+
+# Switch QUERY_LLM_MODEL to a cheaper OSS model, restart Podman, then:
+uv run python -m lightrag.evaluation.tax_scenario_eval `
+  --api-url http://localhost:9621 `
+  --modes hybrid `
+  --top-k 50 `
+  --chunk-top-k 50 `
+  --label oss `
+  --output-dir .\live_runs\scenario_oss
+```
+
+Writes under `--output-dir`:
+
+| File | Contents |
+| --- | --- |
+| `recon.json` | Per seed × mode chunks + `graph_context_present` |
+| `scenario_oracle.generated.json` | Drafted expected_* from hints that hit recon |
+| `answers/<case_id>.json` | Question, mode, model tags, answer text, refs, scores |
+| `scenario_report.json` | Full packs + WHAT-IF diffs + `model_ab` |
+| `recommendation.json` | Headline **answer** metrics + diagnosis |
+
+**What to compare across models (`--label sonnet` vs `oss`):**
+
+1. `recommendation.json` → `headline_answer_metrics`
+   (`answer_pass_rate`, `issues_hit_rate`, `benefits_hit_rate`,
+   `citation_source_hit_rate`) — primary QUERY-model signal
+2. Side-by-side `answers/` folders — same `case_id`, different model tags
+3. `what_if.changed_rate` / `must_change_hit_rate` — variant sensitivity
+4. Retrieval (`mean_source_type_recall`, trap suppress) — secondary; often
+   similar across QUERY models when KEYWORD/embeddings are unchanged
+
+Exit codes: `0` run completed (gates informational), `1` API/hard error or
+`--strict` answer pass-rate miss, `2` gated off / bad flags.
+
+Offline unit tests: `./scripts/test.sh tests/evaluation/test_tax_scenario_eval.py`.
+
+Hand-curated optional path: `tax_scenario_oracle.json` (disabled example shells).
+Generated oracles stay under `live_runs/`.
+
 Exit codes for `tax_retrieval_fitness`: `0` gates passed, `1` gates failed,
 `2` gated-off / server down / bad config.
 
@@ -166,7 +225,7 @@ WIP live oracles). Omitting `enabled` means the case is active.
 | Trap suppress fails (penalty Part outranks Deduction Division) | Chunk / index layout unfit | Re-ingest with **P** chunker + headings (below) |
 | Section / provision Hit@K low; trap OK | Index missing text or oracle strings drift | Reconcile oracle vs `/query/data`; re-ingest if chunks lack markers |
 | Live check skipped / connect refused | **No fitness verdict** | Run on a host that can reach the API; cloud agents cannot use your `:9621` |
-| Scenario / WHAT-IF gates | **Not in v1** | See [Not yet](#not-yet) |
+| Scenario / WHAT-IF gates | Part 2 harness in progress | See [Scenario + WHAT-IF eval](#scenario--what-if-eval-part-2-first-slice) |
 
 ## Recommended ingest remediations (if gates fail)
 
@@ -221,8 +280,12 @@ Helpers already landed for later packs: `classify_instrument`, `extract_ranked_c
 
 ## Not yet
 
-- **Client-scenario + WHAT-IF evaluation** — `tax_scenario_oracle.json` is reserved
-  (`cases: []`). Intended case shape: Act/TD/PG/PR packs, issues, benefits,
-  `variant_must_change` vs `baseline_case_id`.
-- **Scenario evaluation CLI** / live scenario oracles — not implemented in v1.
-- Enforcing `forbidden_sources` or requiring multi-instrument packs in default gates.
+- **Full agent orchestration** that composes packs into advice workflows —
+  still deferred (scenario eval harness only).
+- **LLM-as-judge / RAGAS** as the primary advisory-tone gate.
+- Enforcing `forbidden_sources` or requiring multi-instrument packs in default
+  v1 retrieval gates.
+
+The Part 2 **eval harness** (`tax_scenario_eval.py` + `tax_scenario_seeds.json`)
+is implemented — see [Scenario + WHAT-IF eval](#scenario--what-if-eval-part-2-first-slice).
+`tax_scenario_oracle.json` remains the hand-curated optional path.

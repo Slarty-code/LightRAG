@@ -1,5 +1,46 @@
 {
-  "description": "NOT YET evaluated. Reserved for client-scenario + WHAT-IF packs. Intended case shape (v2): id, scenario_id, question, baseline_case_id (optional paired variant), what_if (null or variant descriptor), expected_sources {acts,tds,pgs,prs}, expected_issues, expected_benefits, forbidden_sources, variant_must_change (citation/issue/benefit sets that must differ from baseline).",
-  "defaults": {},
-  "cases": []
+  "description": "Hand-curated optional oracle path for client-scenario + WHAT-IF packs. Part 2 live eval harness lives in tax_scenario_eval.py (recon → draft → score packs → WHAT-IF diffs); generated oracles go to tax_fixtures/live_runs/scenario_*/scenario_oracle.generated.json. This file remains the hand-edited optional path — keep cases empty or add disabled shells until curated against a real index.",
+  "defaults": {
+    "top_k": 50,
+    "modes": ["hybrid"],
+    "mode": "hybrid"
+  },
+  "cases": [
+    {
+      "id": "example_home_office_employee_disabled",
+      "enabled": false,
+      "scenario_id": "home_office_v1",
+      "client_facts": "Employee works from home 3 days/week… (fill from live recon).",
+      "question": "REPLACE with full scenario question after recon.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "expected_sources": {"acts": [], "tds": [], "pgs": [], "prs": []},
+      "expected_issues": [],
+      "expected_benefits": [],
+      "expected_sections": [],
+      "expected_chunk_contains": [],
+      "forbidden_chunk_contains": [],
+      "variant_must_change_hints": [],
+      "draft_note": "Disabled example shell — prefer scenario_oracle.generated.json from tax_scenario_eval."
+    },
+    {
+      "id": "example_home_office_sole_trader_disabled",
+      "enabled": false,
+      "scenario_id": "home_office_v1",
+      "client_facts": "WHAT-IF: same pattern but sole trader / contractor.",
+      "question": "REPLACE with WHAT-IF question after recon.",
+      "what_if": "client invoices as sole trader",
+      "baseline_case_id": "example_home_office_employee_disabled",
+      "intent": "what_if",
+      "expected_sources": {"acts": [], "tds": [], "pgs": [], "prs": []},
+      "expected_issues": [],
+      "expected_benefits": [],
+      "expected_sections": [],
+      "expected_chunk_contains": [],
+      "forbidden_chunk_contains": [],
+      "variant_must_change_hints": ["sole trader", "business"],
+      "draft_note": "Disabled WHAT-IF example — pair via baseline_case_id when enabling."
+    }
+  ]
 }

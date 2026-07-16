@@ -1,0 +1,345 @@
+{
+  "description": "AU-tax oriented client-scenario + WHAT-IF seeds for Part 2 live scenario eval (tax_scenario_eval). Each seed combines client facts with a request for Act/TD/PG/PR reference packs plus issues/benefits. Fill expected_* from recon — hints are soft targets, not book oracle truth.",
+  "seeds": [
+    {
+      "id": "scen_home_office_employee",
+      "scenario_id": "home_office_v1",
+      "client_facts": "Employee works from home 3 days/week for an Australian employer, uses a dedicated room for work, pays for electricity and internet personally, and does not receive a home-office allowance.",
+      "question": "Client facts: Employee works from home 3 days/week for an Australian employer, uses a dedicated room for work, pays for electricity and internet personally, and does not receive a home-office allowance. Which ITAA 1997 Act provisions, Taxation Determinations, and Practice Guides apply to claiming home office running expenses? Outline the key issues (apportionment, private or domestic use) and potential deduction benefits.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "home office",
+        "to the extent",
+        "assessable income",
+        "private or domestic"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "apportion",
+        "private or domestic",
+        "to the extent",
+        "home office"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "to the extent",
+        "running expense"
+      ],
+      "forbidden_hints": ["penalty for false"],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_home_office_sole_trader",
+      "scenario_id": "home_office_v1",
+      "client_facts": "Same home-office pattern as the employee baseline, but the client invoices as a sole trader / independent contractor rather than being an employee.",
+      "question": "WHAT-IF: Same facts as an employee home-office claim (dedicated room, 3 days/week, personal electricity and internet, no allowance), except the client invoices as a sole trader / independent contractor. How do the applicable Act/TD/PG references, issues, and deduction benefits change versus an employee?",
+      "what_if": "client invoices as sole trader / independent contractor instead of employee",
+      "baseline_case_id": "scen_home_office_employee",
+      "intent": "what_if",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "sole trader",
+        "business",
+        "to the extent",
+        "home office"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "business",
+        "apportion",
+        "to the extent",
+        "sole trader"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "to the extent",
+        "business expense"
+      ],
+      "forbidden_hints": ["penalty for false"],
+      "variant_must_change_hints": [
+        "sole trader",
+        "business",
+        "contractor",
+        "employee"
+      ]
+    },
+    {
+      "id": "scen_general_business_expense",
+      "scenario_id": "business_expense_v1",
+      "client_facts": "An Australian small business taxpayer incurs ordinary operating costs (office supplies, professional subscriptions, and travel to meet clients) wholly in the course of carrying on a business that produces assessable income.",
+      "question": "Client facts: An Australian small business taxpayer incurs ordinary operating costs (office supplies, professional subscriptions, and travel to meet clients) wholly in the course of carrying on a business that produces assessable income. Which Act provisions and ATO guidance (TD/PG) support claiming these as general deductions? List issues and benefits for a reference pack.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "general deduction",
+        "assessable income",
+        "business",
+        "Division 8"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA", "Division 8"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "positive limb",
+        "negative limb",
+        "capital",
+        "private or domestic"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "assessable income",
+        "loss or outgoing"
+      ],
+      "forbidden_hints": ["penalty for false", "stamp duty"],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_apportionment_extent",
+      "scenario_id": "apportionment_v1",
+      "client_facts": "A taxpayer has a mixed-use outgoing: 60% relates to gaining assessable income and 40% is private. They ask how ITAA 1997 s 8-1 'to the extent' requires apportionment.",
+      "question": "Client facts: A taxpayer has a mixed-use outgoing — 60% relates to gaining assessable income and 40% is private. How does 'to the extent' in ITAA 1997 s 8-1 require apportionment? Cite applicable Act text and any TD/PG that explain the issues and the deductible benefit.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [
+        "to the extent",
+        "apportion",
+        "apportionment",
+        "s 8-1",
+        "8-1",
+        "private or domestic"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "to the extent"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "apportion",
+        "to the extent",
+        "private or domestic",
+        "mixed"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "to the extent",
+        "60"
+      ],
+      "forbidden_hints": ["penalty for false", "administrative penalty"],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_keyword_trap_deduction",
+      "scenario_id": "keyword_trap_v1",
+      "client_facts": null,
+      "question": "deduction",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [],
+      "expected_sources_hints": {
+        "acts": [],
+        "tds": [],
+        "pgs": [],
+        "prs": []
+      },
+      "expected_issues_hints": [],
+      "expected_benefits_hints": [],
+      "forbidden_hints": [
+        "penalty",
+        "Part 4",
+        "false or misleading",
+        "administrative penalty"
+      ],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_act_td_pg_crosswalk",
+      "scenario_id": "crosswalk_s8_1_v1",
+      "client_facts": "Advisor needs a pack that joins the general deduction rule in ITAA 1997 s 8-1 with ATO Taxation Determinations and Practice Guides on apportionment.",
+      "question": "Build a crosswalk reference pack: which Taxation Determinations and Practice Guides explain how 'to the extent' in ITAA 1997 section 8-1 requires apportionment of a loss or outgoing? Include Act anchors, TD/PG cites, and the issues/benefits those instruments address.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [
+        "to the extent",
+        "apportionment",
+        "s 8-1",
+        "8-1",
+        "Taxation Determination",
+        "Practice Guide",
+        "TD",
+        "PG"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "apportionment",
+        "to the extent"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "to the extent"
+      ],
+      "forbidden_hints": ["penalty for false"],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_penalty_false_statement",
+      "scenario_id": "penalty_negative_v1",
+      "client_facts": "Client asks about penalties for a false or misleading statement about a deduction claim. This must not dominate ordinary deduction advice packs.",
+      "question": "What penalties apply for a false or misleading statement about a deduction claim? Do not treat this as the primary advice for ordinary s 8-1 deduction eligibility.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [],
+      "expected_sources_hints": {
+        "acts": [],
+        "tds": [],
+        "pgs": [],
+        "prs": []
+      },
+      "expected_issues_hints": [],
+      "expected_benefits_hints": [],
+      "forbidden_hints": [
+        "penalty",
+        "false or misleading",
+        "administrative penalty",
+        "Part 4"
+      ],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_capital_vs_revenue",
+      "scenario_id": "capital_vs_revenue_v1",
+      "client_facts": "A business taxpayer spent a large sum improving a business premises and also paid routine repair costs. They want to know which amounts may be deductible under the general deduction rule versus treated as capital.",
+      "question": "Client facts: A business taxpayer spent a large sum improving a business premises and also paid routine repair costs. Under ITAA 1997 s 8-1, which issues distinguish capital outgoings from deductible revenue expenses, and what deduction benefits (if any) remain? Cite Act and any TD/PG guidance.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "capital",
+        "negative limb",
+        "repair",
+        "assessable income"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "capital",
+        "negative limb",
+        "repair"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "repair",
+        "assessable income"
+      ],
+      "forbidden_hints": ["penalty for false"],
+      "variant_must_change_hints": []
+    },
+    {
+      "id": "scen_employee_allowance_what_if",
+      "scenario_id": "home_office_v1",
+      "client_facts": "Same employee home-office facts, but the employer now pays a modest home-office allowance that may be assessable.",
+      "question": "WHAT-IF relative to the employee home-office baseline: the employer now pays a modest home-office allowance that may be assessable. How do issues and benefits change for claiming additional running expenses under s 8-1 / related TD/PG?",
+      "what_if": "employer pays a home-office allowance that may be assessable",
+      "baseline_case_id": "scen_home_office_employee",
+      "intent": "what_if",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "allowance",
+        "assessable",
+        "home office",
+        "to the extent"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": []
+      },
+      "expected_issues_hints": [
+        "allowance",
+        "assessable",
+        "apportion",
+        "to the extent"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "to the extent"
+      ],
+      "forbidden_hints": ["penalty for false"],
+      "variant_must_change_hints": [
+        "allowance",
+        "assessable"
+      ]
+    },
+    {
+      "id": "scen_product_ruling_contrast",
+      "scenario_id": "pr_contrast_v1",
+      "client_facts": "A taxpayer asks whether a Product Ruling is needed for an ordinary s 8-1 business expense claim, or whether Act/TD/PG material is sufficient.",
+      "question": "Client facts: A taxpayer asks whether a Product Ruling is required for an ordinary general deduction under ITAA 1997 s 8-1 for routine business expenses, or whether Act / Taxation Determination / Practice Guide material is enough. Outline issues, benefits, and when a PR would (or would not) belong in the pack.",
+      "what_if": null,
+      "baseline_case_id": null,
+      "intent": "scenario",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "Product Ruling",
+        "general deduction",
+        "Practice Guide",
+        "Taxation Determination"
+      ],
+      "expected_sources_hints": {
+        "acts": ["8-1", "ITAA"],
+        "tds": ["TD"],
+        "pgs": ["PG"],
+        "prs": ["PR"]
+      },
+      "expected_issues_hints": [
+        "Product Ruling",
+        "general deduction"
+      ],
+      "expected_benefits_hints": [
+        "deduction",
+        "assessable income"
+      ],
+      "forbidden_hints": ["penalty for false"],
+      "variant_must_change_hints": []
+    }
+  ]
+}
