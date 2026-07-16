@@ -1,0 +1,101 @@
+{
+  "description": "AU-tax oriented seed questions for the live recon → oracle draft → mode/top_k sweep loop. Anchors target ITAA 1997 s 8-1 / Division 8 general deductions, apportionment via 'to the extent', keyword-trap bare 'deduction', TD/PG crosswalk, and a negative/penalty trap. Fill expected_* from recon against a real index — do not treat these strings as book oracle truth.",
+  "seeds": [
+    {
+      "id": "seed_s8_1_general_deduction",
+      "question": "When can a taxpayer claim a general deduction under ITAA 1997 section 8-1?",
+      "intent": "provision",
+      "anchor_terms": [
+        "section 8-1",
+        "s 8-1",
+        "8-1",
+        "general deduction",
+        "assessable income",
+        "to the extent"
+      ],
+      "forbidden_hints": [
+        "penalty",
+        "Part 4",
+        "false or misleading"
+      ]
+    },
+    {
+      "id": "seed_apportionment_to_the_extent",
+      "question": "How does 'to the extent' in ITAA 1997 s 8-1 require apportionment of a loss or outgoing?",
+      "intent": "provision",
+      "anchor_terms": [
+        "to the extent",
+        "apportion",
+        "apportionment",
+        "s 8-1",
+        "8-1",
+        "Division 8"
+      ],
+      "forbidden_hints": [
+        "penalty",
+        "administrative penalty"
+      ]
+    },
+    {
+      "id": "seed_keyword_trap_deduction",
+      "question": "deduction",
+      "intent": "trap",
+      "pair_with": "seed_s8_1_general_deduction",
+      "anchor_terms": [],
+      "forbidden_hints": [
+        "penalty",
+        "Part 4",
+        "false or misleading",
+        "administrative penalty"
+      ]
+    },
+    {
+      "id": "seed_td_pg_crosswalk_s8_1",
+      "question": "Does an ATO Taxation Determination or Practice Guide explain how 'to the extent' in section 8-1 requires apportionment?",
+      "intent": "crosswalk",
+      "anchor_terms": [
+        "to the extent",
+        "apportionment",
+        "s 8-1",
+        "8-1",
+        "Taxation Determination",
+        "Practice Guide",
+        "TD",
+        "PG"
+      ],
+      "forbidden_hints": [
+        "penalty for false"
+      ]
+    },
+    {
+      "id": "seed_rules_s8_1_limbs",
+      "question": "Cite the positive and negative limbs of the general deduction rule in ITAA 1997 s 8-1 and how apportionment applies.",
+      "intent": "rules",
+      "anchor_terms": [
+        "s 8-1",
+        "8-1",
+        "to the extent",
+        "assessable income",
+        "capital",
+        "private or domestic"
+      ],
+      "forbidden_hints": [
+        "stamp duty",
+        "penalty for false"
+      ]
+    },
+    {
+      "id": "seed_penalty_trap_negative",
+      "question": "What penalties apply for a false or misleading statement about a deduction claim?",
+      "intent": "trap",
+      "pair_with": "seed_s8_1_general_deduction",
+      "anchor_terms": [],
+      "forbidden_hints": [
+        "penalty",
+        "false or misleading",
+        "administrative penalty",
+        "Part 4"
+      ]
+    }
+  ]
+}

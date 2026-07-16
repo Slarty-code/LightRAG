@@ -75,7 +75,49 @@ TAX_EVAL_LIVE=true python -m lightrag.evaluation.tax_retrieval_fitness \
   --modes naive,local,hybrid,mix
 ```
 
-Exit codes: `0` gates passed, `1` gates failed, `2` gated-off / server down / bad config.
+### Live loop on real corpus
+
+Use this when the synthetic oracle scores look misleading on a real Podman /
+local index (e.g. high provision Hit@K, low section Hit@K). The loop recons
+seed questions, auto-drafts a live oracle from observed chunks, then sweeps
+modes × `top_k` under **current** LightRAG settings (no re-ingest).
+
+```bash
+TAX_EVAL_LIVE=true python -m lightrag.evaluation.tax_live_loop \
+  --api-url http://localhost:9621 \
+  --top-k-values 10,20 \
+  --retrieval-only
+```
+
+PowerShell (Windows / Podman host that can reach `:9621`):
+
+```powershell
+$env:TAX_EVAL_LIVE = "true"
+python -m lightrag.evaluation.tax_live_loop `
+  --api-url http://localhost:9621 `
+  --top-k-values 10,20 `
+  --modes mix,hybrid,naive,local `
+  --output-dir .\live_runs\manual
+```
+
+Writes under `--output-dir` (default `lightrag/evaluation/tax_fixtures/live_runs/<timestamp>`):
+
+| File | Contents |
+| --- | --- |
+| `recon.json` | Per seed × mode top chunks (path, headings, instrument, snippet) |
+| `live_oracle.generated.json` | Auto-drafted retrieval cases (`enabled` only when anchors hit) |
+| `live_rules.generated.json` | Light rules cases from `rules` seeds |
+| `sweep.json` | All mode/top_k configs + metrics |
+| `recommendation.json` | Best mode(s)/top_k, metric table, diagnosis bullets |
+
+Exit codes: `0` if recon+sweep completed (gate failures are informational),
+`1` when the API is down / hard errors / live gate off.
+
+Seeds live in `tax_fixtures/tax_live_seed_questions.json` (override with `--seeds`).
+Offline unit tests: `./scripts/test.sh tests/evaluation/test_tax_live_loop.py`.
+
+Exit codes for `tax_retrieval_fitness`: `0` gates passed, `1` gates failed,
+`2` gated-off / server down / bad config.
 
 Cases with `"enabled": false` are skipped by the runner (useful for templates and
 WIP live oracles). Omitting `enabled` means the case is active.

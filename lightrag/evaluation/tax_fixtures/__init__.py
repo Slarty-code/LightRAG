@@ -25,6 +25,8 @@ TAX_RULES_DATASET_JSON = "tax_rules_dataset.json"
 TAX_SCENARIO_ORACLE_JSON = "tax_scenario_oracle.json"
 # Copy-paste template for curating live ITAA/ATO oracles (all cases enabled=false).
 LIVE_ORACLE_TEMPLATE_JSON = "live_oracle_template.json"
+# Seed questions for tax_live_loop recon → auto-draft → sweep.
+TAX_LIVE_SEED_QUESTIONS_JSON = "tax_live_seed_questions.json"
 
 
 def fixture_path(name: str) -> Path:
@@ -41,6 +43,7 @@ __all__ = [
     "PG_MARKDOWN",
     "PR_MARKDOWN",
     "RULES_DATASET_JSON",
+    "TAX_LIVE_SEED_QUESTIONS_JSON",
     "TAX_RETRIEVAL_ORACLE_JSON",
     "TAX_RULES_DATASET_JSON",
     "TAX_SCENARIO_ORACLE_JSON",
