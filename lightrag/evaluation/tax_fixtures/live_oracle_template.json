@@ -1,0 +1,74 @@
+{
+  "description": "TEMPLATE ONLY — copy to a local file (e.g. live_oracle.local.json, gitignored) before enabling cases. Curate ITAA 1936 / 1953 / 1997 + ATO TD / PG / PR questions against a real LightRAG index. Strings in expected_sections, expected_chunk_contains, and expected_sources MUST match indexed chunk text after reconciliation on the WebUI or POST /query/data (content + content_headings + file_path). Do not paste statute book wording that never survived ingest/chunking. All example shells ship with enabled=false; the fitness runner skips disabled cases. Empty pgs/prs arrays are valid when that instrument type is not required for the case.",
+  "defaults": {
+    "top_k": 10,
+    "modes": ["naive", "local", "hybrid", "mix"]
+  },
+  "cases": [
+    {
+      "id": "live_keyword_trap_deduction",
+      "enabled": false,
+      "question": "REPLACE: When can a taxpayer claim a general deduction under ITAA 1997 s 8-1?",
+      "expected_sections": [
+        "REPLACE: heading text as it appears in content_headings / chunk body after ingest"
+      ],
+      "expected_chunk_contains": [
+        "REPLACE: distinctive phrase from the indexed s 8-1 chunk"
+      ],
+      "forbidden_chunk_contains": [
+        "REPLACE: trap keyword that appears in penalties / unrelated Parts mentioning deduction"
+      ],
+      "modes": ["naive", "local", "hybrid", "mix"],
+      "mode": "mix",
+      "top_k": 10
+    },
+    {
+      "id": "live_act_td_crosswalk",
+      "enabled": false,
+      "question": "REPLACE: Does an ATO TD confirm how 'to the extent' in s 8-1 requires apportionment?",
+      "expected_sections": [
+        "REPLACE: Act section marker as indexed",
+        "REPLACE: TD citation as indexed"
+      ],
+      "expected_chunk_contains": [
+        "REPLACE: Act provision phrase",
+        "REPLACE: TD apportionment phrase"
+      ],
+      "forbidden_chunk_contains": [],
+      "expected_sources": {
+        "acts": ["REPLACE: Act filename or section string seen in /query/data"],
+        "tds": ["REPLACE: TD filename or TD YYYY/N string seen in /query/data"],
+        "pgs": [],
+        "prs": []
+      },
+      "modes": ["mix"],
+      "mode": "mix",
+      "top_k": 10
+    },
+    {
+      "id": "live_multi_source_pack",
+      "enabled": false,
+      "question": "REPLACE: Multi-instrument query spanning Act + TD (+ optional PG/PR)",
+      "expected_sections": [
+        "REPLACE: primary Act anchor"
+      ],
+      "expected_chunk_contains": [
+        "REPLACE: distinctive indexed phrase"
+      ],
+      "forbidden_chunk_contains": [],
+      "expected_sources": {
+        "acts": ["REPLACE: Act marker"],
+        "tds": ["REPLACE: TD marker"],
+        "pgs": [],
+        "prs": []
+      },
+      "forbidden_sources": [],
+      "scenario_id": null,
+      "what_if": null,
+      "baseline_case_id": null,
+      "modes": ["hybrid", "mix"],
+      "mode": "mix",
+      "top_k": 10
+    }
+  ]
+}

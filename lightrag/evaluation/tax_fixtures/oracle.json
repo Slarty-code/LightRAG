@@ -1,0 +1,64 @@
+{
+  "description": "Offline chunk-integrity / schema oracle (oracle key). Optional v2 fields reserved for scenario packs match tax_retrieval_oracle.json: expected_sources, expected_issues, expected_benefits, forbidden_sources, scenario_id, what_if, baseline_case_id — unused by v1 integrity checks.",
+  "oracle": [
+    {
+      "question": "When can a taxpayer claim a general deduction under the synthetic Act?",
+      "expected_sections": [
+        "Part 2 — Deductions",
+        "Division 8 — General deductions",
+        "s 8-1"
+      ],
+      "expected_chunk_contains": [
+        "general deduction",
+        "to the extent"
+      ],
+      "forbidden_chunk_contains": [
+        "penalty for false"
+      ],
+      "mode": "mix"
+    },
+    {
+      "question": "What does section 8-5 say about general deductions relative to section 8-1?",
+      "expected_sections": [
+        "Division 8 — General deductions",
+        "s 8-5",
+        "s 8-1"
+      ],
+      "expected_chunk_contains": [
+        "general deduction",
+        "double deduction"
+      ],
+      "forbidden_chunk_contains": [
+        "penalty for false"
+      ],
+      "mode": "hybrid"
+    },
+    {
+      "question": "Does the ATO-style TD confirm that to the extent in s 8-1 requires apportionment?",
+      "expected_sections": [
+        "s 8-1",
+        "TD 2024/1 (Synthetic)"
+      ],
+      "expected_chunk_contains": [
+        "to the extent",
+        "apportionment"
+      ],
+      "forbidden_chunk_contains": [
+        "penalty for false"
+      ],
+      "expected_sources": {
+        "acts": ["s 8-1", "mini_ita_deductions"],
+        "tds": ["TD 2024/1", "td_general_deductions"],
+        "pgs": ["PG 2024/1", "pg_general_deductions"],
+        "prs": ["PR 2024/1", "pr_general_deductions"]
+      },
+      "expected_issues": [],
+      "expected_benefits": [],
+      "forbidden_sources": ["penalty for false"],
+      "scenario_id": null,
+      "what_if": null,
+      "baseline_case_id": null,
+      "mode": "mix"
+    }
+  ]
+}
