@@ -116,6 +116,41 @@ Exit codes: `0` if recon+sweep completed (gate failures are informational),
 Seeds live in `tax_fixtures/tax_live_seed_questions.json` (override with `--seeds`).
 Offline unit tests: `./scripts/test.sh tests/evaluation/test_tax_live_loop.py`.
 
+### Model A/B (tag reports with QUERY LLM)
+
+After settling mode/`top_k`, compare cheap vs ZDR query models without mixing
+JSON dumps. `tax_model_ab` reads `GET /health` →
+`configuration.role_llm_config.QUERY.model` (fallback `configuration.llm_model`),
+runs fitness, and writes a tagged report.
+
+```powershell
+# Peek at what the server thinks QUERY is
+$env:TAX_EVAL_LIVE = "true"
+uv run python -m lightrag.evaluation.tax_model_ab `
+  --api-url http://localhost:9621 `
+  --print-model-only
+
+# Baseline (cheap QUERY_LLM_MODEL)
+uv run python -m lightrag.evaluation.tax_model_ab `
+  --api-url http://localhost:9621 `
+  --label cheap `
+  --modes hybrid `
+  --oracle .\live_runs\topk_hybrid\live_oracle.generated.json `
+  --rules .\live_runs\topk_hybrid\live_rules.generated.json `
+  --output-dir .\live_runs\model_ab
+
+# Switch QUERY_LLM_MODEL to ZDR model, restart Podman, then:
+uv run python -m lightrag.evaluation.tax_model_ab `
+  --label zdr `
+  --modes hybrid `
+  --oracle .\live_runs\topk_hybrid\live_oracle.generated.json `
+  --rules .\live_runs\topk_hybrid\live_rules.generated.json `
+  --output-dir .\live_runs\model_ab
+```
+
+Each report includes `model_ab.query_llm_model`, `label`, and a filename like
+`fitness_zdr_vendor__model_….json`.
+
 Exit codes for `tax_retrieval_fitness`: `0` gates passed, `1` gates failed,
 `2` gated-off / server down / bad config.
 
