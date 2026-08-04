@@ -5,11 +5,17 @@ import sys
 sys.argv = sys.argv[:1]
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, Form, HTTPException
 
 from lightrag.api.routers import document_routes
+
 from lightrag.api.routers.document_routes import (
+    _cleanup_expired_preflight_entries,
+    _get_preflight_entry,
+    _optional_form_bool,
+    _optional_form_str,
     _raise_large_ingestion_error_with_preflight,
+    _store_preflight_entry,
     enforce_max_ingestion_chunks,
 )
 from lightrag.api.routers.ingestion_routes import (
@@ -202,3 +208,56 @@ async def test_stop_active_job_sets_pipeline_stop_flag():
             assert pipeline_status["stopped_job_id"] == "job-1"
     finally:
         finalize_share_data()
+
+
+@pytest.mark.offline
+def test_optional_form_str_ignores_unparsed_form_default():
+    assert _optional_form_str(Form(default=None)) is None
+    assert _optional_form_str("  preflight_abc  ") == "preflight_abc"
+    assert _optional_form_str("   ") is None
+
+
+@pytest.mark.offline
+def test_optional_form_bool_ignores_unparsed_form_default():
+    assert _optional_form_bool(Form(False)) is False
+    assert _optional_form_bool(True) is True
+    assert _optional_form_bool("true") is True
+    assert _optional_form_bool("0") is False
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_preflight_entry_expires_on_lookup():
+    workspace = "test_preflight_expiry"
+    initialize_share_data()
+    try:
+        rag = ControlRAG(workspace, MemoryDocStatus({}))
+        preflight_id = "preflight_expired"
+        await _store_preflight_entry(
+            rag,
+            {
+                "preflight_id": preflight_id,
+                "file_name": "doc.txt",
+                "file_sha256": "abc",
+                "estimated_chunks": 1,
+                "expires_at_ts": 1,
+                "created_at_ts": 1,
+            },
+        )
+
+        assert await _get_preflight_entry(rag, preflight_id) is None
+    finally:
+        finalize_share_data()
+
+
+@pytest.mark.offline
+def test_cleanup_expired_preflight_entries_removes_stale_rows():
+    state = {
+        "entries": {
+            "fresh": {"expires_at_ts": 9_999_999_999, "created_at_ts": 2},
+            "stale": {"expires_at_ts": 1, "created_at_ts": 1},
+        }
+    }
+    _cleanup_expired_preflight_entries(state)
+    assert "stale" not in state["entries"]
+    assert "fresh" in state["entries"]

@@ -16,8 +16,6 @@ from lightrag.base import DocStatus
 from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
 
 
-router = APIRouter(prefix="/api/ingestion", tags=["ingestion"])
-
 # Legacy doc_status value before STOPPED rename (dev/fork compatibility).
 _LEGACY_STOPPED_STATUS = "paused"
 
@@ -266,6 +264,9 @@ async def start_over_ingestion_job(
 
 
 def create_ingestion_routes(rag: LightRAG, api_key: Optional[str] = None) -> APIRouter:
+    # Fresh router per call — avoid duplicate route registration on the module-level
+    # router when create_app() runs more than once in the same process (tests).
+    router = APIRouter(prefix="/api/ingestion", tags=["ingestion"])
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.post(

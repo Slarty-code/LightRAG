@@ -1173,7 +1173,9 @@ async def test_upload_rejects_same_name_failed_doc_status_without_full_docs(
     # Other tests (e.g. test_auth.py) may replace global_args with a SimpleNamespace
     # that lacks max_upload_size; pin a known state so the upload endpoint runs.
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes,
+        "global_args",
+        SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0),
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag(
@@ -1210,7 +1212,9 @@ async def test_upload_rejects_same_name_failed_doc_status_without_full_docs(
 
 async def test_upload_rejects_parser_hinted_filesystem_duplicate(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes,
+        "global_args",
+        SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0),
     )
     (tmp_path / "existing.docx").write_bytes(b"existing docx bytes")
     doc_manager = DocumentManager(str(tmp_path))
@@ -1240,7 +1244,7 @@ async def test_upload_rejects_malformed_hint_with_detail(tmp_path, monkeypatch):
     detailed hint error in the 400 body (it used to be accepted and only
     surface later as an error document)."""
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes, "global_args", SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0)
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})
@@ -1272,7 +1276,9 @@ async def test_upload_succeeds_concurrent_with_pipeline_busy(tmp_path, monkeypat
     import importlib
 
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes,
+        "global_args",
+        SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0),
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})
@@ -1336,7 +1342,9 @@ async def test_upload_returns_409_when_scanning_classification(tmp_path, monkeyp
     import importlib
 
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes,
+        "global_args",
+        SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0),
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})
@@ -1375,7 +1383,7 @@ async def test_upload_returns_409_when_manual_freeze(tmp_path, monkeypatch):
     import importlib
 
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes, "global_args", SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0)
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})
@@ -1416,7 +1424,9 @@ async def test_upload_succeeds_during_scan_processing_phase(tmp_path, monkeypatc
     import importlib
 
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes,
+        "global_args",
+        SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0),
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})
@@ -2354,7 +2364,9 @@ async def test_two_concurrent_uploads_both_succeed_when_pipeline_busy(
     import importlib
 
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes,
+        "global_args",
+        SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0),
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})
@@ -2778,7 +2790,7 @@ async def test_upload_managed_task_released_on_shutdown_drain(tmp_path, monkeypa
     import importlib
 
     monkeypatch.setattr(
-        _document_routes, "global_args", SimpleNamespace(max_upload_size=None)
+        _document_routes, "global_args", SimpleNamespace(max_upload_size=None, max_ingestion_chunks=0)
     )
     doc_manager = DocumentManager(str(tmp_path))
     rag = _DuplicateUploadRag({})

@@ -240,6 +240,28 @@ async def estimate_chunk_count_for_file(rag: LightRAG, file_path: Path) -> int:
         return estimate_chunk_count_from_tokens(estimated_tokens, step=step)
 
 
+def _optional_form_str(value: Any) -> str | None:
+    """Return a stripped form string, or None when unset.
+
+    Unit tests invoke route handlers directly without FastAPI form parsing,
+    so default ``Form(...)`` values arrive as ``Form`` instances rather than
+    ``str | None``.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _optional_form_bool(value: Any) -> bool:
+    """Coerce a form boolean; treat unparsed ``Form`` defaults as false."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _raise_large_ingestion_error(estimated_chunks: int, max_chunks: int) -> None:
     _raise_large_ingestion_error_with_preflight(
         estimated_chunks=estimated_chunks, max_chunks=max_chunks, preflight_id=None
@@ -432,6 +454,8 @@ def enforce_max_ingestion_chunks(
     confirm_large_ingestion: bool = False,
 ) -> int:
     max_chunks = resolve_max_ingestion_chunks()
+    if max_chunks is None:
+        return 0
     estimated_chunks = estimate_chunk_count_for_texts(rag, texts)
     if (
         max_chunks is not None
@@ -449,6 +473,8 @@ async def enforce_max_ingestion_chunks_for_file(
     confirm_large_ingestion: bool = False,
 ) -> int:
     max_chunks = resolve_max_ingestion_chunks()
+    if max_chunks is None:
+        return 0
     estimated_chunks = await estimate_chunk_count_for_file(rag, file_path)
     if (
         max_chunks is not None
@@ -5411,6 +5437,9 @@ def create_document_routes(
                 flight, 413 file too large, 500 other errors.
         """
         from lightrag.kg.shared_storage import start_reserved_background_task
+
+        confirm_large_ingestion = _optional_form_bool(confirm_large_ingestion)
+        preflight_id = _optional_form_str(preflight_id)
 
         enqueue_token, admission_adopted = _adopt_or_new_enqueue_token(http_request)
         handed_off = False
