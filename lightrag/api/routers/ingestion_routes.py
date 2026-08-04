@@ -218,8 +218,7 @@ async def start_over_ingestion_job(
     candidates: list[str] = []
     for candidate in [
         job_id,
-        pipeline_status.get("stopped_job_id")
-        or pipeline_status.get("paused_job_id"),
+        pipeline_status.get("stopped_job_id") or pipeline_status.get("paused_job_id"),
         *(pipeline_status.get("active_track_ids") or []),
     ]:
         if candidate and candidate not in candidates:

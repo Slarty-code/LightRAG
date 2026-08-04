@@ -5914,9 +5914,7 @@ class _PipelineMixin:
                     f"{total_files}: {file_path}"
                 )
             else:
-                error_msg = (
-                    f"User stopped safely {current_file_number}/{total_files}: {file_path}"
-                )
+                error_msg = f"User stopped safely {current_file_number}/{total_files}: {file_path}"
             logger.info(error_msg)
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = error_msg

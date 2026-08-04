@@ -267,11 +267,15 @@ def _raise_large_ingestion_error_with_preflight(
     raise HTTPException(status_code=400, detail=detail)
 
 
-def _chunk_estimation_step_for_process_options(rag: LightRAG, process_options: str) -> int:
+def _chunk_estimation_step_for_process_options(
+    rag: LightRAG, process_options: str
+) -> int:
     """Resolve estimator step using per-doc chunk options when available."""
     from lightrag.parser.routing import resolve_chunk_options
 
-    chunk_opts = resolve_chunk_options(rag.addon_params, process_options=process_options)
+    chunk_opts = resolve_chunk_options(
+        rag.addon_params, process_options=process_options
+    )
     chunk_size = int(chunk_opts.get("chunk_token_size") or rag.chunk_token_size)
     overlap = int(
         (chunk_opts.get("fixed_token") or {}).get(
@@ -378,7 +382,9 @@ def _cleanup_expired_preflight_entries(state: dict[str, Any]) -> None:
 async def _store_preflight_entry(rag: LightRAG, entry: dict[str, Any]) -> None:
     from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
 
-    state = await get_namespace_data(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    state = await get_namespace_data(
+        INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace
+    )
     lock = get_namespace_lock(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
     async with lock:
         if not state:
@@ -388,10 +394,14 @@ async def _store_preflight_entry(rag: LightRAG, entry: dict[str, Any]) -> None:
         entries[entry["preflight_id"]] = entry
 
 
-async def _get_preflight_entry(rag: LightRAG, preflight_id: str) -> dict[str, Any] | None:
+async def _get_preflight_entry(
+    rag: LightRAG, preflight_id: str
+) -> dict[str, Any] | None:
     from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
 
-    state = await get_namespace_data(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    state = await get_namespace_data(
+        INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace
+    )
     lock = get_namespace_lock(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
     async with lock:
         if not state:
@@ -404,7 +414,9 @@ async def _get_preflight_entry(rag: LightRAG, preflight_id: str) -> dict[str, An
 async def _delete_preflight_entry(rag: LightRAG, preflight_id: str) -> None:
     from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
 
-    state = await get_namespace_data(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
+    state = await get_namespace_data(
+        INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace
+    )
     lock = get_namespace_lock(INGESTION_PREFLIGHT_NAMESPACE, workspace=rag.workspace)
     async with lock:
         if not state:
@@ -1066,7 +1078,9 @@ class InsertResponse(BaseModel):
 class UploadPreflightResponse(BaseModel):
     """Response model for chunk-guard preflight estimation."""
 
-    preflight_id: str = Field(description="Short-lived token bound to this file payload")
+    preflight_id: str = Field(
+        description="Short-lived token bound to this file payload"
+    )
     estimated_chunks: int = Field(
         description="Estimated chunk count computed from parser-extracted text"
     )
@@ -1076,7 +1090,9 @@ class UploadPreflightResponse(BaseModel):
     confirm_required: bool = Field(
         description="Whether explicit confirmation is required before ingestion"
     )
-    expires_at: str = Field(description="ISO timestamp when the preflight token expires")
+    expires_at: str = Field(
+        description="ISO timestamp when the preflight token expires"
+    )
 
 
 class ClearDocumentsResponse(BaseModel):
@@ -5254,7 +5270,9 @@ def create_document_routes(
         normalized_process_options = (
             sanitize_process_options(process_options) or PROCESS_OPTION_CHUNK_FIXED
         )
-        step = _chunk_estimation_step_for_process_options(rag, normalized_process_options)
+        step = _chunk_estimation_step_for_process_options(
+            rag, normalized_process_options
+        )
 
         extracted_text: str | None = None
         ext = Path(safe_filename).suffix.lower()
@@ -5303,7 +5321,9 @@ def create_document_routes(
             estimated_chunks=estimated_chunks,
             max_chunks=max_chunks,
             confirm_required=confirm_required,
-            expires_at=datetime.fromtimestamp(expires_at_ts, tz=timezone.utc).isoformat(),
+            expires_at=datetime.fromtimestamp(
+                expires_at_ts, tz=timezone.utc
+            ).isoformat(),
         )
 
     @router.post(
